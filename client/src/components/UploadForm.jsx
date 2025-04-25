@@ -15,7 +15,7 @@ const UploadForm = () => {
   const loadRelatedImages = (className) => {
     try {
       const context = require.context(
-        "./assets/RelatedImages",
+        "./assets/RelatedImages", // Adjust path if needed
         false,
         new RegExp(`^./${className}/.*\\.jpg$`)
       );
@@ -32,6 +32,7 @@ const UploadForm = () => {
     e.preventDefault();
     console.log("Form submitted");
 
+    // Validate files are selected
     if (!image || !jsonFile) {
       setError("Please select both an image and a JSON file.");
       return;
@@ -48,44 +49,62 @@ const UploadForm = () => {
     formData.append("json", jsonFile);
 
     try {
-      console.log("Sending request...");
+      console.log("Sending request to backend...");
       const response = await axios.post(
         "https://project-phjh.onrender.com/upload",
         formData,
         {
-          headers: { "Content-Type": "multipart/form-data" },
-          withCredentials: false, // Ensure no credentials are sent
+          headers: { 
+            "Content-Type": "multipart/form-data"
+          },
+          withCredentials: false, // Important for CORS requests
+          timeout: 60000 // 60 seconds timeout for long operations
         }
       );
 
+      // Debugging: Log the response
       console.log("Response from backend:", response.data);
 
       if (response.data.predictions) {
         setPredictions(response.data.predictions);
 
+        // Find the class with the highest probability
         const highestPrediction = response.data.predictions.reduce(
           (max, prediction) =>
             prediction.probability > max.probability ? prediction : max,
           { probability: 0 }
         );
 
-        loadRelatedImages(highestPrediction.class);
+        // Load related images based on the highest prediction class
+        if (highestPrediction && highestPrediction.class) {
+          loadRelatedImages(highestPrediction.class);
+        }
       } else {
         setError("Predictions are missing in the response.");
       }
 
       if (response.data.segmented_image) {
-        // Construct full URL for the segmented image
-        const fullImageUrl = `https://project-phjh.onrender.com/images/${response.data.segmented_image}`;
-        setImageUrl(fullImageUrl);
-        console.log("Segmented Image URL:", fullImageUrl);
+        // Construct the full URL for the segmented image
+        const segmentedImageUrl = `https://project-phjh.onrender.com${response.data.segmented_image}`;
+        setImageUrl(segmentedImageUrl);
+        console.log("Segmented Image URL:", segmentedImageUrl);
       }
     } catch (err) {
       console.error("Error during upload:", err);
-      setError(
-        err.response?.data?.error ||
-          "An error occurred during the upload. Please check your network or try again later."
-      );
+      
+      // Better error handling with more specific messages
+      if (err.code === "ERR_NETWORK") {
+        setError("Network error: The server is unreachable or CORS is not configured correctly.");
+      } else if (err.response) {
+        // Server responded with a status code that falls out of the range of 2xx
+        setError(`Server error: ${err.response.data?.error || err.response.statusText || "Unknown error"}`);
+      } else if (err.request) {
+        // The request was made but no response was received
+        setError("No response from server. Please try again later.");
+      } else {
+        // Something happened in setting up the request that triggered an Error
+        setError(`Error: ${err.message || "Unknown error occurred"}`);
+      }
     } finally {
       setLoading(false);
     }
@@ -137,7 +156,25 @@ const UploadForm = () => {
         </form>
 
         {error && (
-          <div className="mt-6 text-red-600 text-center">{error}</div>
+          <div className="mt-4 p-3 bg-red-100 border border-red-300 text-red-700 rounded-md">
+            <p className="font-semibold">Error:</p>
+            <p>{error}</p>
+          </div>
+        )}
+
+        {imageUrl && (
+          <div className="mt-6">
+            <h3 className="font-semibold text-pink-800 mb-2">Segmented Image:</h3>
+            <img 
+              src={imageUrl} 
+              alt="Segmented Result" 
+              className="w-full rounded-md shadow-sm"
+              onError={(e) => {
+                console.error("Image failed to load");
+                setError("Failed to load the segmented image.");
+              }}
+            />
+          </div>
         )}
 
         {predictions && (
@@ -152,11 +189,20 @@ const UploadForm = () => {
             </ul>
           </div>
         )}
-
-        {imageUrl && (
+        
+        {relatedImages.length > 0 && (
           <div className="mt-6">
-            <h3 className="font-semibold text-pink-800">Segmented Image:</h3>
-            <img src={imageUrl} alt="Segmented" className="w-full mt-2" />
+            <h3 className="font-semibold text-pink-800 mb-2">Related Images:</h3>
+            <div className="grid grid-cols-2 gap-2">
+              {relatedImages.map((img, index) => (
+                <img 
+                  key={index} 
+                  src={img} 
+                  alt={`Related ${index + 1}`} 
+                  className="w-full h-32 object-cover rounded-md"
+                />
+              ))}
+            </div>
           </div>
         )}
       </div>
