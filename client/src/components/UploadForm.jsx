@@ -15,7 +15,7 @@ const UploadForm = () => {
   const loadRelatedImages = (className) => {
     try {
       const context = require.context(
-        "./assets/RelatedImages", // Adjust path if needed
+        "./assets/RelatedImages",
         false,
         new RegExp(`^./${className}/.*\\.jpg$`)
       );
@@ -31,6 +31,11 @@ const UploadForm = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     console.log("Form submitted");
+
+    if (!image || !jsonFile) {
+      setError("Please select both an image and a JSON file.");
+      return;
+    }
 
     setLoading(true);
     setError(null);
@@ -49,36 +54,37 @@ const UploadForm = () => {
         formData,
         {
           headers: { "Content-Type": "multipart/form-data" },
+          withCredentials: false, // Ensure no credentials are sent
         }
       );
 
-      // Debugging: Log the response
       console.log("Response from backend:", response.data);
 
       if (response.data.predictions) {
         setPredictions(response.data.predictions);
 
-        // Find the class with the highest probability
         const highestPrediction = response.data.predictions.reduce(
           (max, prediction) =>
             prediction.probability > max.probability ? prediction : max,
           { probability: 0 }
         );
 
-        // Load related images based on the highest prediction class
         loadRelatedImages(highestPrediction.class);
       } else {
         setError("Predictions are missing in the response.");
       }
 
       if (response.data.segmented_image) {
-        setImageUrl(response.data.segmented_image);
-        console.log("Segmented Image URL:", response.data.segmented_image);
+        // Construct full URL for the segmented image
+        const fullImageUrl = `https://project-phjh.onrender.com/images/${response.data.segmented_image}`;
+        setImageUrl(fullImageUrl);
+        console.log("Segmented Image URL:", fullImageUrl);
       }
     } catch (err) {
       console.error("Error during upload:", err);
       setError(
-        err.response?.data?.error || "An error occurred during the upload"
+        err.response?.data?.error ||
+          "An error occurred during the upload. Please check your network or try again later."
       );
     } finally {
       setLoading(false);
@@ -130,6 +136,10 @@ const UploadForm = () => {
           </button>
         </form>
 
+        {error && (
+          <div className="mt-6 text-red-600 text-center">{error}</div>
+        )}
+
         {predictions && (
           <div className="mt-6">
             <h3 className="font-semibold text-pink-800">Predictions:</h3>
@@ -140,6 +150,13 @@ const UploadForm = () => {
                 </li>
               ))}
             </ul>
+          </div>
+        )}
+
+        {imageUrl && (
+          <div className="mt-6">
+            <h3 className="font-semibold text-pink-800">Segmented Image:</h3>
+            <img src={imageUrl} alt="Segmented" className="w-full mt-2" />
           </div>
         )}
       </div>
