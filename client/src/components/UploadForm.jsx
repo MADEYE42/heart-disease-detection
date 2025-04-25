@@ -1,7 +1,11 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import axios from "axios";
 
 import BackgroundImage from "../assets/Background.png";
+
+const BACKEND_URL = "https://project-phjh.onrender.com";
+const MAX_RETRIES = 2;
+const RETRY_DELAY = 3000; // 3 seconds
 
 const UploadForm = () => {
   const [image, setImage] = useState(null);
@@ -9,8 +13,30 @@ const UploadForm = () => {
   const [predictions, setPredictions] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [retries, setRetries] = useState(0);
   const [relatedImages, setRelatedImages] = useState([]);
   const [imageUrl, setImageUrl] = useState(null);
+  const [serverStatus, setServerStatus] = useState("unknown");
+  
+  // Check server health on component mount
+  useEffect(() => {
+    checkServerHealth();
+  }, []);
+  
+  const checkServerHealth = async () => {
+    try {
+      const response = await axios.get(`${BACKEND_URL}/health`, { timeout: 10000 });
+      setServerStatus(response.data.model_loaded ? "ready" : "loading");
+      
+      // If model still loading, retry after delay
+      if (!response.data.model_loaded) {
+        setTimeout(checkServerHealth, 5000);
+      }
+    } catch (error) {
+      console.error("Server health check failed:", error);
+      setServerStatus("unavailable");
+    }
+  };
 
   const loadRelatedImages = (className) => {
     try {
@@ -24,7 +50,7 @@ const UploadForm = () => {
       setRelatedImages(images);
     } catch (error) {
       console.error("Error loading related images:", error);
-      setError("Failed to load related images.");
+      // Don't set an error here, just log it - we don't want to override the main error message
     }
   };
 
@@ -37,32 +63,46 @@ const UploadForm = () => {
       setError("Please select both an image and a JSON file.");
       return;
     }
+    
+    // Check if server is ready
+    if (serverStatus === "loading") {
+      setError("The server is still loading the model. Please wait a moment and try again.");
+      return;
+    }
+    
+    if (serverStatus === "unavailable") {
+      setError("The server appears to be unavailable. Please try again later.");
+      return;
+    }
 
     setLoading(true);
     setError(null);
     setPredictions(null);
     setRelatedImages([]);
     setImageUrl(null);
-
+    setRetries(0);
+    
+    await uploadFiles();
+  };
+  
+  const uploadFiles = async () => {
     const formData = new FormData();
     formData.append("image", image);
     formData.append("json", jsonFile);
 
     try {
-      console.log("Sending request to backend...");
+      console.log(`Sending request to backend (attempt ${retries + 1})...`);
       const response = await axios.post(
-        "https://project-phjh.onrender.com/upload",
+        `${BACKEND_URL}/upload`,
         formData,
         {
-          headers: { 
-            "Content-Type": "multipart/form-data"
-          },
-          withCredentials: false, // Important for CORS requests
-          timeout: 60000 // 60 seconds timeout for long operations
+          headers: { "Content-Type": "multipart/form-data" },
+          withCredentials: false,
+          timeout: 30000 // Reduced timeout to 30 seconds
         }
       );
 
-      // Debugging: Log the response
+      // Log the response
       console.log("Response from backend:", response.data);
 
       if (response.data.predictions) {
@@ -80,32 +120,49 @@ const UploadForm = () => {
           loadRelatedImages(highestPrediction.class);
         }
       } else {
-        setError("Predictions are missing in the response.");
+        setError("No predictions received from the server.");
       }
 
       if (response.data.segmented_image) {
         // Construct the full URL for the segmented image
-        const segmentedImageUrl = `https://project-phjh.onrender.com${response.data.segmented_image}`;
+        const segmentedImageUrl = `${BACKEND_URL}${response.data.segmented_image}`;
         setImageUrl(segmentedImageUrl);
         console.log("Segmented Image URL:", segmentedImageUrl);
+      } else {
+        console.warn("No segmented image in response");
       }
+      
+      setLoading(false);
+      
     } catch (err) {
       console.error("Error during upload:", err);
       
-      // Better error handling with more specific messages
-      if (err.code === "ERR_NETWORK") {
-        setError("Network error: The server is unreachable or CORS is not configured correctly.");
+      // Handle the error based on type
+      if (err.code === "ECONNABORTED") {
+        if (retries < MAX_RETRIES) {
+          console.log(`Request timed out. Retrying in ${RETRY_DELAY/1000} seconds...`);
+          setError(`Request timed out. Retrying (${retries + 1}/${MAX_RETRIES})...`);
+          
+          setRetries(prev => prev + 1);
+          setTimeout(() => {
+            uploadFiles();
+          }, RETRY_DELAY);
+          return;
+        } else {
+          setError("The server is taking too long to respond. The operation might be too resource-intensive. Please try with a smaller image or try again later.");
+        }
+      } else if (err.code === "ERR_NETWORK") {
+        setError("Network error: The server is unreachable. Please check your internet connection or try again later.");
       } else if (err.response) {
-        // Server responded with a status code that falls out of the range of 2xx
-        setError(`Server error: ${err.response.data?.error || err.response.statusText || "Unknown error"}`);
+        // Server responded with an error status
+        const errorMsg = err.response.data?.error || err.response.statusText || "Unknown error";
+        setError(`Server error: ${errorMsg}`);
       } else if (err.request) {
-        // The request was made but no response was received
-        setError("No response from server. Please try again later.");
+        setError("No response from server. The server might be overloaded or down. Please try again later.");
       } else {
-        // Something happened in setting up the request that triggered an Error
         setError(`Error: ${err.message || "Unknown error occurred"}`);
       }
-    } finally {
+      
       setLoading(false);
     }
   };
@@ -119,6 +176,19 @@ const UploadForm = () => {
         <h1 className="text-3xl font-semibold text-center mb-6 text-pink-800">
           Upload Files
         </h1>
+        
+        {serverStatus === "loading" && (
+          <div className="mb-4 p-3 bg-yellow-100 border border-yellow-300 text-yellow-700 rounded-md">
+            <p>Server is initializing. Model is still loading, which may cause delays.</p>
+          </div>
+        )}
+        
+        {serverStatus === "unavailable" && (
+          <div className="mb-4 p-3 bg-red-100 border border-red-300 text-red-700 rounded-md">
+            <p>Server appears to be unavailable. Processing may fail.</p>
+          </div>
+        )}
+        
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
             <label className="block mb-2 text-sm text-pink-700">
@@ -131,6 +201,11 @@ const UploadForm = () => {
               required
               className="w-full p-3 border border-pink-300 rounded-md bg-pink-50 text-pink-700 focus:outline-none focus:ring-2 focus:ring-pink-400"
             />
+            {image && (
+              <p className="mt-1 text-xs text-gray-500">
+                Selected file: {image.name} ({(image.size / 1024).toFixed(2)} KB)
+              </p>
+            )}
           </div>
           <div>
             <label className="block mb-2 text-sm text-pink-700">
@@ -143,6 +218,11 @@ const UploadForm = () => {
               required
               className="w-full p-3 border border-pink-300 rounded-md bg-pink-50 text-pink-700 focus:outline-none focus:ring-2 focus:ring-pink-400"
             />
+            {jsonFile && (
+              <p className="mt-1 text-xs text-gray-500">
+                Selected file: {jsonFile.name} ({(jsonFile.size / 1024).toFixed(2)} KB)
+              </p>
+            )}
           </div>
           <button
             type="submit"
@@ -151,7 +231,7 @@ const UploadForm = () => {
               loading ? "opacity-50" : "hover:bg-pink-600"
             } transition-all`}
           >
-            {loading ? "Processing..." : "Submit"}
+            {loading ? `Processing${".".repeat(retries + 1)}` : "Submit"}
           </button>
         </form>
 
@@ -171,7 +251,8 @@ const UploadForm = () => {
               className="w-full rounded-md shadow-sm"
               onError={(e) => {
                 console.error("Image failed to load");
-                setError("Failed to load the segmented image.");
+                e.target.style.display = 'none';
+                setError(prev => prev ? `${prev}\nFailed to load the segmented image.` : "Failed to load the segmented image.");
               }}
             />
           </div>
