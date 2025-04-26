@@ -16,15 +16,9 @@ logging.basicConfig(level=logging.INFO)
 
 # Initialize Flask app
 app = Flask(__name__)
-# Enable CORS for the Vercel frontend
-CORS(app, resources={
-    r"/*": {
-        "origins": ["https://heart-disease-detection-rosy.vercel.app"],
-        "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"],
-        "supports_credentials": False
-    }
-})
+
+# Enable CORS for all domains (more permissive to help with debugging)
+CORS(app, supports_credentials=False)
 
 # Directory for file uploads and results
 UPLOAD_FOLDER = 'uploads'
@@ -52,10 +46,22 @@ def load_model_on_startup():
 # Start model loading in a separate thread to avoid blocking app startup
 threading.Thread(target=load_model_on_startup).start()
 
+# Helper function to add CORS headers to all responses
+def add_cors_headers(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    return response
+
 # Health check endpoint
-@app.route('/health', methods=['GET'])
+@app.route('/health', methods=['GET', 'OPTIONS'])
 def health_check():
-    return jsonify({"status": "healthy", "model_loaded": model_loaded})
+    if request.method == 'OPTIONS':
+        response = app.make_default_options_response()
+        return add_cors_headers(response)
+        
+    response = jsonify({"status": "healthy", "model_loaded": model_loaded})
+    return add_cors_headers(response)
 
 # Route for uploading image and JSON files
 @app.route('/upload', methods=['POST', 'OPTIONS'])
@@ -63,26 +69,26 @@ def upload_files():
     # Handle preflight OPTIONS requests
     if request.method == 'OPTIONS':
         response = app.make_default_options_response()
-        response.headers.add('Access-Control-Allow-Origin', 'https://heart-disease-detection-rosy.vercel.app')
-        response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
-        return response
+        return add_cors_headers(response)
         
     try:
         # Check if model is loaded
         global model_loaded, model
         if not model_loaded:
-            return jsonify({'error': 'Model is still loading. Please try again in a few moments.'}), 503
+            response = jsonify({'error': 'Model is still loading. Please try again in a few moments.'}), 503
+            return add_cors_headers(response[0]), response[1]
         
         # Check if files are included
         if 'image' not in request.files or 'json' not in request.files:
-            return jsonify({'error': 'No image or JSON file part in the request'}), 400
+            response = jsonify({'error': 'No image or JSON file part in the request'}), 400
+            return add_cors_headers(response[0]), response[1]
         
         image_file = request.files['image']
         json_file = request.files['json']
         
         if image_file.filename == '' or json_file.filename == '':
-            return jsonify({'error': 'No file selected'}), 400
+            response = jsonify({'error': 'No file selected'}), 400
+            return add_cors_headers(response[0]), response[1]
 
         # Generate unique filenames to avoid conflicts
         import uuid
@@ -102,12 +108,14 @@ def upload_files():
         # Load the JSON and Image
         data, image = load_json_and_image(json_path, image_path)
         if data is None or image is None:
-            return jsonify({"error": "Failed to load files"}), 400
+            response = jsonify({"error": "Failed to load files"}), 400
+            return add_cors_headers(response[0]), response[1]
 
         # Perform Segmentation
         segmented_image = draw_segmentation(data, image)
         if segmented_image is None:
-            return jsonify({"error": "Segmentation failed"}), 500
+            response = jsonify({"error": "Segmentation failed"}), 500
+            return add_cors_headers(response[0]), response[1]
 
         # Save the segmented image with unique name
         segmented_image_filename = f"segmented_{unique_id}.jpg"
@@ -122,7 +130,8 @@ def upload_files():
             predictions = predict_single_image(segmented_image_path, model, classes, torch.device("cuda" if torch.cuda.is_available() else "cpu"))
             
             if predictions is None:
-                return jsonify({"error": "Prediction failed"}), 500
+                response = jsonify({"error": "Prediction failed"}), 500
+                return add_cors_headers(response[0]), response[1]
                 
             logging.info(f"Predictions: {predictions}")
             
@@ -133,31 +142,36 @@ def upload_files():
                 "segmented_image": f'/results/{segmented_image_filename}'
             })
             
-            # Add CORS headers for the Vercel frontend
-            response.headers.add('Access-Control-Allow-Origin', 'https://heart-disease-detection-rosy.vercel.app')
-            return response
+            return add_cors_headers(response)
             
         except Exception as e:
             logging.error(f"Prediction error: {str(e)}")
-            return jsonify({"error": f"Prediction error: {str(e)}"}), 500
+            response = jsonify({"error": f"Prediction error: {str(e)}"}), 500
+            return add_cors_headers(response[0]), response[1]
 
     except Exception as e:
         logging.error(f"Error in upload process: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        response = jsonify({"error": str(e)}), 500
+        return add_cors_headers(response[0]), response[1]
 
 # Route to serve the segmented images
 @app.route('/results/<filename>')
 def serve_result(filename):
     response = send_from_directory(RESULTS_FOLDER, filename)
-    response.headers.add('Access-Control-Allow-Origin', 'https://heart-disease-detection-rosy.vercel.app')
-    return response
+    return add_cors_headers(response)
 
 # Route to serve uploaded files (if needed)
 @app.route('/uploads/<filename>')
 def serve_upload(filename):
     response = send_from_directory(UPLOAD_FOLDER, filename)
-    response.headers.add('Access-Control-Allow-Origin', 'https://heart-disease-detection-rosy.vercel.app')
-    return response
+    return add_cors_headers(response)
+
+# Add OPTIONS handling for all routes to support CORS preflight requests
+@app.route('/', defaults={'path': ''}, methods=['OPTIONS'])
+@app.route('/<path:path>', methods=['OPTIONS'])
+def options_handler(path):
+    response = app.make_default_options_response()
+    return add_cors_headers(response)
 
 # Main entry point
 if __name__ == "__main__":

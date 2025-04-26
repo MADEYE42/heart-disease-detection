@@ -3,8 +3,9 @@ import axios from "axios";
 
 import BackgroundImage from "../assets/Background.png";
 
+// Updated to use the Render deployment URL
 const BACKEND_URL = "https://heart-disease-detection-01.onrender.com";
-const MAX_RETRIES = 2;
+const MAX_RETRIES = 3;
 const RETRY_DELAY = 3000; // 3 seconds
 
 const UploadForm = () => {
@@ -21,11 +22,29 @@ const UploadForm = () => {
   // Check server health on component mount
   useEffect(() => {
     checkServerHealth();
-  }, []);
+    
+    // Set up a periodic health check
+    const healthCheckInterval = setInterval(() => {
+      if (serverStatus !== "ready") {
+        checkServerHealth();
+      }
+    }, 10000); // Check every 10 seconds if not ready
+    
+    // Clean up interval when component unmounts
+    return () => clearInterval(healthCheckInterval);
+  }, [serverStatus]);
   
   const checkServerHealth = async () => {
     try {
-      const response = await axios.get(`${BACKEND_URL}/health`, { timeout: 10000 });
+      console.log("Checking server health...");
+      const response = await axios.get(`${BACKEND_URL}/health`, { 
+        timeout: 15000,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        }
+      });
+      console.log("Health check response:", response.data);
       setServerStatus(response.data.model_loaded ? "ready" : "loading");
       
       // If model still loading, retry after delay
@@ -35,6 +54,14 @@ const UploadForm = () => {
     } catch (error) {
       console.error("Server health check failed:", error);
       setServerStatus("unavailable");
+      
+      // Display a more helpful error message
+      setError(prev => {
+        if (!prev || !prev.includes("Server is unavailable")) {
+          return "Server is unavailable or experiencing issues. Please try again later.";
+        }
+        return prev;
+      });
     }
   };
 
@@ -71,8 +98,18 @@ const UploadForm = () => {
     }
     
     if (serverStatus === "unavailable") {
-      setError("The server appears to be unavailable. Please try again later.");
-      return;
+      // Try one more health check before giving up
+      try {
+        setError("Checking server availability...");
+        await checkServerHealth();
+        if (serverStatus === "unavailable") {
+          setError("The server appears to be unavailable. Please try again later.");
+          return;
+        }
+      } catch {
+        setError("The server appears to be unavailable. Please try again later.");
+        return;
+      }
     }
 
     setLoading(true);
@@ -96,9 +133,11 @@ const UploadForm = () => {
         `${BACKEND_URL}/upload`,
         formData,
         {
-          headers: { "Content-Type": "multipart/form-data" },
+          headers: { 
+            "Content-Type": "multipart/form-data"
+          },
           withCredentials: false,
-          timeout: 30000 // Reduced timeout to 30 seconds
+          timeout: 60000 // Increased timeout to 60 seconds for large files
         }
       );
 
@@ -153,12 +192,16 @@ const UploadForm = () => {
         }
       } else if (err.code === "ERR_NETWORK") {
         setError("Network error: The server is unreachable. Please check your internet connection or try again later.");
+        // Check server health after a network error
+        setTimeout(() => checkServerHealth(), 5000);
       } else if (err.response) {
         // Server responded with an error status
         const errorMsg = err.response.data?.error || err.response.statusText || "Unknown error";
         setError(`Server error: ${errorMsg}`);
       } else if (err.request) {
         setError("No response from server. The server might be overloaded or down. Please try again later.");
+        // Check server health after no response
+        setTimeout(() => checkServerHealth(), 5000);
       } else {
         setError(`Error: ${err.message || "Unknown error occurred"}`);
       }
@@ -186,6 +229,18 @@ const UploadForm = () => {
         {serverStatus === "unavailable" && (
           <div className="mb-4 p-3 bg-red-100 border border-red-300 text-red-700 rounded-md">
             <p>Server appears to be unavailable. Processing may fail.</p>
+            <button 
+              onClick={checkServerHealth}
+              className="mt-2 p-2 bg-red-200 hover:bg-red-300 rounded text-sm"
+            >
+              Retry Connection
+            </button>
+          </div>
+        )}
+        
+        {serverStatus === "ready" && (
+          <div className="mb-4 p-3 bg-green-100 border border-green-300 text-green-700 rounded-md">
+            <p>Server is ready to process images.</p>
           </div>
         )}
         
@@ -226,9 +281,9 @@ const UploadForm = () => {
           </div>
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || serverStatus === "unavailable"}
             className={`w-full py-3 rounded-md bg-pink-500 text-white font-semibold ${
-              loading ? "opacity-50" : "hover:bg-pink-600"
+              loading || serverStatus === "unavailable" ? "opacity-50" : "hover:bg-pink-600"
             } transition-all`}
           >
             {loading ? `Processing${".".repeat(retries + 1)}` : "Submit"}
