@@ -4,7 +4,7 @@ import axios from "axios";
 import BackgroundImage from "../assets/Background.png";
 
 // Backend URL (assumed to be Render; update if Vercel)
-const BACKEND_URL = "https://heart-disease-detection-01.onrender.com";
+const BACKEND_URL = "https://server-5ge0.onrender.com";
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 3000; // 3 seconds
 
