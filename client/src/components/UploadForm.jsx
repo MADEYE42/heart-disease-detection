@@ -3,7 +3,7 @@ import axios from "axios";
 
 import BackgroundImage from "../assets/Background.png";
 
-// Updated Backend URL to match the Render service
+// Backend URL
 const BACKEND_URL = "https://server-5ge0.onrender.com";
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 3000; // 3 seconds
@@ -59,7 +59,7 @@ const UploadForm = () => {
     formData.append("json", jsonFile);
 
     try {
-      console.log(`Sending request to backend (attempt ${retries + 1})...`);
+      console.log(`Sending POST request to ${BACKEND_URL}/upload (attempt ${retries + 1})...`);
       const response = await axios.post(
         `${BACKEND_URL}/upload`,
         formData,
@@ -68,7 +68,7 @@ const UploadForm = () => {
             "Content-Type": "multipart/form-data"
           },
           withCredentials: false,
-          timeout: 90000 // Increased to 90 seconds for reliability
+          timeout: 90000 // 90 seconds
         }
       );
 
@@ -122,7 +122,7 @@ const UploadForm = () => {
         setError("Network error: The server is unreachable. Please check your internet connection or try again later.");
       } else if (err.response) {
         const errorMsg = err.response.data?.error || err.response.statusText || "Unknown error";
-        setError(`Server error: ${errorMsg}`);
+        setError(`Server error (${err.response.status}): ${errorMsg}`);
       } else if (err.request) {
         setError("No response from server. The server might be overloaded or down. Please try again later.");
       } else {
@@ -174,7 +174,7 @@ const UploadForm = () => {
             />
             {jsonFile && (
               <p className="mt-1 text-xs text-gray-500">
-                Selected file: {jsonFile.name} ({(jsonFile.size / 1024).toFixed(2)} KB)
+                Selected file: {jsonFile.name} ({(image.size / 1024).toFixed(2)} KB)
               </p>
             )}
           </div>
