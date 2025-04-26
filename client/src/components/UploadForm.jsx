@@ -3,7 +3,7 @@ import axios from "axios";
 
 import BackgroundImage from "../assets/Background.png";
 
-const BACKEND_URL = "https://project-phjh.onrender.com";
+const BACKEND_URL = "https://heart-disease-detection-01.onrender.com";
 const MAX_RETRIES = 2;
 const RETRY_DELAY = 3000; // 3 seconds
 

@@ -16,12 +16,13 @@ logging.basicConfig(level=logging.INFO)
 
 # Initialize Flask app
 app = Flask(__name__)
-# Enable CORS with specific origin - updated for Vercel frontend
+# Enable CORS for the Vercel frontend
 CORS(app, resources={
     r"/*": {
         "origins": ["https://heart-disease-detection-rosy.vercel.app"],
         "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"]
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": False
     }
 })
 
@@ -62,7 +63,6 @@ def upload_files():
     # Handle preflight OPTIONS requests
     if request.method == 'OPTIONS':
         response = app.make_default_options_response()
-        # Updated to match Vercel domain
         response.headers.add('Access-Control-Allow-Origin', 'https://heart-disease-detection-rosy.vercel.app')
         response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
@@ -133,7 +133,7 @@ def upload_files():
                 "segmented_image": f'/results/{segmented_image_filename}'
             })
             
-            # Updated to match Vercel domain
+            # Add CORS headers for the Vercel frontend
             response.headers.add('Access-Control-Allow-Origin', 'https://heart-disease-detection-rosy.vercel.app')
             return response
             
@@ -148,12 +148,16 @@ def upload_files():
 # Route to serve the segmented images
 @app.route('/results/<filename>')
 def serve_result(filename):
-    return send_from_directory(RESULTS_FOLDER, filename)
+    response = send_from_directory(RESULTS_FOLDER, filename)
+    response.headers.add('Access-Control-Allow-Origin', 'https://heart-disease-detection-rosy.vercel.app')
+    return response
 
 # Route to serve uploaded files (if needed)
 @app.route('/uploads/<filename>')
 def serve_upload(filename):
-    return send_from_directory(UPLOAD_FOLDER, filename)
+    response = send_from_directory(UPLOAD_FOLDER, filename)
+    response.headers.add('Access-Control-Allow-Origin', 'https://heart-disease-detection-rosy.vercel.app')
+    return response
 
 # Main entry point
 if __name__ == "__main__":
