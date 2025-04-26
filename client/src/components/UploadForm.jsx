@@ -3,10 +3,11 @@ import axios from "axios";
 
 import BackgroundImage from "../assets/Background.png";
 
-// Updated to use the Render deployment URL
+// Backend URL (assumed to be Render; update if Vercel)
 const BACKEND_URL = "https://heart-disease-detection-01.onrender.com";
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 3000; // 3 seconds
+const HEALTH_CHECK_TIMEOUT = 30000; // 30 seconds for health checks
 
 const UploadForm = () => {
   const [image, setImage] = useState(null);
@@ -19,6 +20,36 @@ const UploadForm = () => {
   const [imageUrl, setImageUrl] = useState(null);
   const [serverStatus, setServerStatus] = useState("unknown");
   
+  // Check server health with retries
+  const checkServerHealth = async (retryCount = 0, maxRetries = 3) => {
+    try {
+      console.log(`Checking server health (attempt ${retryCount + 1}/${maxRetries})...`);
+      const response = await axios.get(`${BACKEND_URL}/health`, { 
+        timeout: HEALTH_CHECK_TIMEOUT,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        }
+      });
+      console.log("Health check response:", response.data);
+      setServerStatus(response.data.model_loaded ? "ready" : "loading");
+      
+      // If model still loading, retry after delay
+      if (!response.data.model_loaded) {
+        setTimeout(() => checkServerHealth(0, maxRetries), 5000);
+      }
+    } catch (error) {
+      console.error("Server health check failed:", error, error.config, error.response);
+      if (error.code === "ECONNABORTED" && retryCount < maxRetries - 1) {
+        console.log(`Health check timed out. Retrying in ${RETRY_DELAY/1000} seconds...`);
+        setTimeout(() => checkServerHealth(retryCount + 1, maxRetries), RETRY_DELAY);
+        return;
+      }
+      setServerStatus("unavailable");
+      setError("Server is unavailable or experiencing issues. Please try again later.");
+    }
+  };
+
   // Check server health on component mount
   useEffect(() => {
     checkServerHealth();
@@ -33,42 +64,11 @@ const UploadForm = () => {
     // Clean up interval when component unmounts
     return () => clearInterval(healthCheckInterval);
   }, [serverStatus]);
-  
-  const checkServerHealth = async () => {
-    try {
-      console.log("Checking server health...");
-      const response = await axios.get(`${BACKEND_URL}/health`, { 
-        timeout: 15000,
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      });
-      console.log("Health check response:", response.data);
-      setServerStatus(response.data.model_loaded ? "ready" : "loading");
-      
-      // If model still loading, retry after delay
-      if (!response.data.model_loaded) {
-        setTimeout(checkServerHealth, 5000);
-      }
-    } catch (error) {
-      console.error("Server health check failed:", error);
-      setServerStatus("unavailable");
-      
-      // Display a more helpful error message
-      setError(prev => {
-        if (!prev || !prev.includes("Server is unavailable")) {
-          return "Server is unavailable or experiencing issues. Please try again later.";
-        }
-        return prev;
-      });
-    }
-  };
 
   const loadRelatedImages = (className) => {
     try {
       const context = require.context(
-        "./assets/RelatedImages", // Adjust path if needed
+        "./assets/RelatedImages",
         false,
         new RegExp(`^./${className}/.*\\.jpg$`)
       );
@@ -77,7 +77,6 @@ const UploadForm = () => {
       setRelatedImages(images);
     } catch (error) {
       console.error("Error loading related images:", error);
-      // Don't set an error here, just log it - we don't want to override the main error message
     }
   };
 
@@ -98,15 +97,9 @@ const UploadForm = () => {
     }
     
     if (serverStatus === "unavailable") {
-      // Try one more health check before giving up
-      try {
-        setError("Checking server availability...");
-        await checkServerHealth();
-        if (serverStatus === "unavailable") {
-          setError("The server appears to be unavailable. Please try again later.");
-          return;
-        }
-      } catch {
+      setError("Checking server availability...");
+      await checkServerHealth();
+      if (serverStatus === "unavailable") {
         setError("The server appears to be unavailable. Please try again later.");
         return;
       }
@@ -137,11 +130,10 @@ const UploadForm = () => {
             "Content-Type": "multipart/form-data"
           },
           withCredentials: false,
-          timeout: 60000 // Increased timeout to 60 seconds for large files
+          timeout: 60000 // 60 seconds for uploads
         }
       );
 
-      // Log the response
       console.log("Response from backend:", response.data);
 
       if (response.data.predictions) {
@@ -163,7 +155,6 @@ const UploadForm = () => {
       }
 
       if (response.data.segmented_image) {
-        // Construct the full URL for the segmented image
         const segmentedImageUrl = `${BACKEND_URL}${response.data.segmented_image}`;
         setImageUrl(segmentedImageUrl);
         console.log("Segmented Image URL:", segmentedImageUrl);
@@ -176,7 +167,6 @@ const UploadForm = () => {
     } catch (err) {
       console.error("Error during upload:", err);
       
-      // Handle the error based on type
       if (err.code === "ECONNABORTED") {
         if (retries < MAX_RETRIES) {
           console.log(`Request timed out. Retrying in ${RETRY_DELAY/1000} seconds...`);
@@ -192,15 +182,12 @@ const UploadForm = () => {
         }
       } else if (err.code === "ERR_NETWORK") {
         setError("Network error: The server is unreachable. Please check your internet connection or try again later.");
-        // Check server health after a network error
         setTimeout(() => checkServerHealth(), 5000);
       } else if (err.response) {
-        // Server responded with an error status
         const errorMsg = err.response.data?.error || err.response.statusText || "Unknown error";
         setError(`Server error: ${errorMsg}`);
       } else if (err.request) {
         setError("No response from server. The server might be overloaded or down. Please try again later.");
-        // Check server health after no response
         setTimeout(() => checkServerHealth(), 5000);
       } else {
         setError(`Error: ${err.message || "Unknown error occurred"}`);
@@ -213,7 +200,7 @@ const UploadForm = () => {
   return (
     <div
       className="min-h-[70vh] bg-cover bg-center bg-no-repeat flex justify-center items-center p-6"
-      style={{ backgroundImage: `url(${BackgroundImage})` }}
+      style={{ backgroundBackgroundImage: `url(${BackgroundImage})` }}
     >
       <div className="bg-white bg-opacity-70 p-8 rounded-lg shadow-lg w-full max-w-lg">
         <h1 className="text-3xl font-semibold text-center mb-6 text-pink-800">
@@ -230,7 +217,7 @@ const UploadForm = () => {
           <div className="mb-4 p-3 bg-red-100 border border-red-300 text-red-700 rounded-md">
             <p>Server appears to be unavailable. Processing may fail.</p>
             <button 
-              onClick={checkServerHealth}
+              onClick={() => checkServerHealth()}
               className="mt-2 p-2 bg-red-200 hover:bg-red-300 rounded text-sm"
             >
               Retry Connection
