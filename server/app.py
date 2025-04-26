@@ -55,19 +55,6 @@ def add_cors_headers(response):
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     return response
 
-# Health check endpoint with response time logging
-@app.route('/health', methods=['GET', 'OPTIONS'])
-def health_check():
-    start_time = time()
-    if request.method == 'OPTIONS':
-        response = app.make_default_options_response()
-        logging.info(f"OPTIONS /health processed in {time() - start_time:.3f} seconds")
-        return add_cors_headers(response)
-        
-    response = jsonify({"status": "healthy", "model_loaded": model_loaded})
-    logging.info(f"GET /health processed in {time() - start_time:.3f} seconds")
-    return add_cors_headers(response)
-
 # Route for uploading image and JSON files
 @app.route('/upload', methods=['POST', 'OPTIONS'])
 def upload_files():
