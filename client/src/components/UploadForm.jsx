@@ -4,7 +4,7 @@ import axios from "axios";
 import BackgroundImage from "../assets/Background.png";
 
 // Backend URL
-const BACKEND_URL = "https://server-5ge0.onrender.com";
+const BACKEND_URL = "https://server-5ge0.onrender.com/upload"; // Replace with your backend URL
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 3000; // 3 seconds
 
@@ -61,7 +61,7 @@ const UploadForm = () => {
     try {
       console.log(`Sending POST request to ${BACKEND_URL}/upload (attempt ${retries + 1})...`);
       const response = await axios.post(
-        `${BACKEND_URL}/upload`,
+        `${BACKEND_URL}`,
         formData,
         {
           headers: { 
