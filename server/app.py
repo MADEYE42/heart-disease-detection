@@ -16,10 +16,10 @@ logging.basicConfig(level=logging.INFO)
 
 # Initialize Flask app
 app = Flask(__name__)
-# Enable CORS with specific origin
+# Enable CORS with specific origin - updated for Vercel frontend
 CORS(app, resources={
     r"/*": {
-        "origins": ["https://heart-disease-detection-2qcz.onrender.com"],
+        "origins": ["https://heart-disease-detection-rosy.vercel.app"],
         "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization"]
     }
@@ -62,7 +62,8 @@ def upload_files():
     # Handle preflight OPTIONS requests
     if request.method == 'OPTIONS':
         response = app.make_default_options_response()
-        response.headers.add('Access-Control-Allow-Origin', 'https://heart-disease-detection-2qcz.onrender.com')
+        # Updated to match Vercel domain
+        response.headers.add('Access-Control-Allow-Origin', 'https://heart-disease-detection-rosy.vercel.app')
         response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
         return response
@@ -132,7 +133,8 @@ def upload_files():
                 "segmented_image": f'/results/{segmented_image_filename}'
             })
             
-            response.headers.add('Access-Control-Allow-Origin', 'https://heart-disease-detection-2qcz.onrender.com')
+            # Updated to match Vercel domain
+            response.headers.add('Access-Control-Allow-Origin', 'https://heart-disease-detection-rosy.vercel.app')
             return response
             
         except Exception as e:
