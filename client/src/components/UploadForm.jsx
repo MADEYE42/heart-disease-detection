@@ -3,7 +3,7 @@ import axios from "axios";
 
 import BackgroundImage from "../assets/Background.png";
 
-// Backend URL (assumed to be Render; update if Vercel)
+// Updated Backend URL to match the Render service
 const BACKEND_URL = "https://server-5ge0.onrender.com";
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 3000; // 3 seconds
@@ -68,7 +68,7 @@ const UploadForm = () => {
             "Content-Type": "multipart/form-data"
           },
           withCredentials: false,
-          timeout: 60000 // 60 seconds for uploads
+          timeout: 90000 // Increased to 90 seconds for reliability
         }
       );
 
@@ -103,7 +103,7 @@ const UploadForm = () => {
       setLoading(false);
       
     } catch (err) {
-      console.error("Error during upload:", err);
+      console.error("Error during upload:", err, err.config, err.response);
       
       if (err.code === "ECONNABORTED") {
         if (retries < MAX_RETRIES) {
