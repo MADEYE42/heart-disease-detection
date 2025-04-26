@@ -174,7 +174,7 @@ const UploadForm = () => {
             />
             {jsonFile && (
               <p className="mt-1 text-xs text-gray-500">
-                Selected file: {jsonFile.name} ({(image.size / 1024).toFixed(2)} KB)
+                Selected file: {jsonFile.name} ({(jsonFile.size / 1024).toFixed(2)} KB)
               </p>
             )}
           </div>
