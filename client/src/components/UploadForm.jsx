@@ -4,7 +4,7 @@ import axios from "axios";
 import BackgroundImage from "../assets/Background.png";
 
 // Backend URL (remove trailing slash)
-const BACKEND_URL = "https://server-uw6b.onrender.com";
+const BACKEND_URL = "https://server-rho-bay.vercel.app/";
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 3000; // 3 seconds
 
