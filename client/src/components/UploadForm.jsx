@@ -3,8 +3,8 @@ import axios from "axios";
 
 import BackgroundImage from "../assets/Background.png";
 
-// Backend URL
-const BACKEND_URL = "https://server-5ge0.onrender.com/"; // Replace with your backend URL
+// Backend URL (remove trailing slash)
+const BACKEND_URL = "https://server-5ge0.onrender.com";
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 3000; // 3 seconds
 
