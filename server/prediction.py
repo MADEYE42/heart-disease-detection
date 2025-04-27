@@ -50,7 +50,7 @@ def load_model(model_path, num_classes, device):
     try:
         model = get_advanced_model(num_classes)
         # Use weights_only=True for security and future compatibility
-        model.load_state_dict(torch.load(model_path, map_location=device, weights_only=False))
+        model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
         model = model.to(device)
         model.eval()
         print("Model loaded successfully.")
