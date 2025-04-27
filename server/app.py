@@ -39,7 +39,7 @@ def load_model_on_startup():
         device = torch.device("cpu")
         logging.info(f"Loading model on device: {device}")
         model = load_model(MODEL_PATH, num_classes=10, device=device)
-        model_loaded = True
+        model_loaded = False
         logging.info("Model loaded successfully")
     except Exception as e:
         logging.error(f"Failed to load model: {str(e)}")

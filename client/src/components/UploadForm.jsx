@@ -2,11 +2,9 @@ import React, { useState } from "react";
 import axios from "axios";
 
 import BackgroundImage from "../assets/Background.png";
-
-// Backend URL (remove trailing slash)
-const BACKEND_URL = "https://server-mlgv.onrender.com";
+const BACKEND_URL = "http://192.168.0.162:5000/";
 const MAX_RETRIES = 3;
-const RETRY_DELAY = 3000; // 3 seconds
+const RETRY_DELAY = 3000; 
 
 const UploadForm = () => {
   const [image, setImage] = useState(null);
