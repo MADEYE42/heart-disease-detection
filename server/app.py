@@ -11,6 +11,13 @@ from flask_cors import CORS
 import logging
 from time import time
 
+# Download model if needed
+try:
+    from model_download import download_model
+    download_model()
+except Exception as e:
+    logging.error(f"Model download failed: {str(e)}")
+
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 
@@ -29,7 +36,7 @@ os.makedirs(RESULTS_FOLDER, exist_ok=True)
 # Global variables for model
 model = None
 
-# Load the model once when imported
+# Load the model
 def initialize_model():
     global model
     try:
@@ -50,7 +57,11 @@ def add_cors_headers(response):
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     return response
 
-# Route for health check that also loads the model if needed
+# Route for health check
+@app.route('/', methods=['GET'])
+def root():
+    return jsonify({"status": "service is running"})
+
 @app.route('/health', methods=['GET'])
 def health_check():
     global model
@@ -182,7 +193,6 @@ def serve_upload(filename):
     return add_cors_headers(response)
 
 # Add OPTIONS handling for all routes to support CORS preflight requests
-@app.route('/', defaults={'path': ''}, methods=['OPTIONS'])
 @app.route('/<path:path>', methods=['OPTIONS'])
 def options_handler(path):
     start_time = time()
@@ -190,10 +200,10 @@ def options_handler(path):
     logging.info(f"OPTIONS /{path} processed in {time() - start_time:.3f} seconds")
     return add_cors_headers(response)
 
-# Attempt to initialize the model when the application starts
+# Try to initialize the model when the application starts
+initialize_model()
+
+# For local development only - not used on Render
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    # Try to load the model at startup
-    initialize_model()
-    # Debug set to False for production
     app.run(host="0.0.0.0", port=port, debug=False)
