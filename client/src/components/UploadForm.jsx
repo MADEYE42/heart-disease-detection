@@ -6,7 +6,7 @@ import BackgroundImage from "../assets/Background.png";
 // Backend URL (remove trailing slash)
 const BACKEND_URL = "https://heart-disease-detection-vwnf.onrender.com";
 const MAX_RETRIES = 3;
-const RETRY_DELAY = 3000; 
+const RETRY_DELAY = 3000;
 
 const UploadForm = () => {
   const [image, setImage] = useState(null);
@@ -36,7 +36,7 @@ const UploadForm = () => {
         setBackendStatus("offline");
       }
     };
-    
+
     checkBackendStatus();
   }, []);
 
@@ -77,85 +77,57 @@ const UploadForm = () => {
     setRelatedImages([]);
     setImageUrl(null);
     setRetries(0);
-    
+
     await uploadFiles();
   };
-  
+
   const uploadFiles = async () => {
     const formData = new FormData();
     formData.append("image", image);
     formData.append("json", jsonFile);
 
-    // Log the formData contents for debugging
     console.log("FormData contents:");
     for (let pair of formData.entries()) {
       console.log(pair[0], pair[1]);
     }
 
     try {
-      // First, make a preflight request
-      if (retries === 0) {
-        try {
-          console.log(`Sending OPTIONS preflight request to ${BACKEND_URL}/upload`);
-          await axios({
-            method: 'OPTIONS',
-            url: `${BACKEND_URL}/upload`,
-            headers: {
-              'Access-Control-Request-Method': 'POST',
-              'Access-Control-Request-Headers': 'content-type'
-            },
-            timeout: 5000
-          });
-          console.log("Preflight request successful");
-        } catch (preflightErr) {
-          console.warn("Preflight request failed:", preflightErr);
-          // Continue anyway, the actual request might work
-        }
-      }
-
       console.log(`Sending POST request to ${BACKEND_URL}/upload (attempt ${retries + 1})...`);
       const response = await axios.post(
         `${BACKEND_URL}/upload`,
         formData,
         {
-          headers: { 
+          headers: {
             "Content-Type": "multipart/form-data",
             "X-Requested-With": "XMLHttpRequest"
           },
-          withCredentials: false,  // Keep this false for cross-origin requests
-          timeout: 90000, // 90 seconds
-          // Added validateStatus to handle non-2xx responses properly
+          withCredentials: false,
+          timeout: 90000,
           validateStatus: function (status) {
-            return status >= 200 && status < 600; // Accept all status codes for better error handling
+            return status >= 200 && status < 600;
           }
         }
       );
 
-      // Log the complete response for debugging
       console.log("Full response:", response);
 
-      // Check if the response has an error status
       if (response.status >= 400) {
-        throw { 
+        throw {
           response: response,
           message: response.data?.error || "Server error"
         };
       }
 
       console.log("Response from backend:", response.data);
-      
-      // Process predictions if available
+
       if (response.data.predictions) {
         setPredictions(response.data.predictions);
-
-        // Find the class with the highest probability
         const highestPrediction = response.data.predictions.reduce(
           (max, prediction) =>
             prediction.probability > max.probability ? prediction : max,
           { probability: 0 }
         );
 
-        // Load related images based on the highest prediction class
         if (highestPrediction && highestPrediction.class) {
           loadRelatedImages(highestPrediction.class);
         }
@@ -163,7 +135,6 @@ const UploadForm = () => {
         setError("No predictions received from the server.");
       }
 
-      // Process segmented image if available
       if (response.data.segmented_image) {
         const segmentedImageUrl = `${BACKEND_URL}${response.data.segmented_image}`;
         setImageUrl(segmentedImageUrl);
@@ -171,28 +142,30 @@ const UploadForm = () => {
       } else {
         console.warn("No segmented image in response");
       }
-      
+
       setLoading(false);
-      
     } catch (err) {
       console.error("Error during upload:", err);
       console.log("Error details:", err.config, err.response);
-      
+
       if (err.code === "ECONNABORTED") {
         if (retries < MAX_RETRIES) {
-          console.log(`Request timed out. Retrying in ${RETRY_DELAY/1000} seconds...`);
+          console.log(`Request timed out. Retrying in ${RETRY_DELAY / 1000} seconds...`);
           setError(`Request timed out. Retrying (${retries + 1}/${MAX_RETRIES})...`);
-          
-          setRetries(prev => prev + 1);
+          setRetries((prev) => prev + 1);
           setTimeout(() => {
             uploadFiles();
           }, RETRY_DELAY);
           return;
         } else {
-          setError("The server is taking too long to respond. The operation might be too resource-intensive. Please try with a smaller image or try again later.");
+          setError(
+            "The server is taking too long to respond. The operation might be too resource-intensive. Please try with a smaller image or try again later."
+          );
         }
       } else if (err.code === "ERR_NETWORK") {
-        setError("Network error: The server is unreachable. This may be due to CORS issues or the server being down. Please check your internet connection or try again later.");
+        setError(
+          "Network error: The server is unreachable. Please check your internet connection or try again later."
+        );
       } else if (err.response) {
         const errorMsg = err.response.data?.error || err.response.statusText || "Unknown error";
         setError(`Server error (${err.response.status}): ${errorMsg}`);
@@ -201,7 +174,7 @@ const UploadForm = () => {
       } else {
         setError(`Error: ${err.message || "Unknown error occurred"}`);
       }
-      
+
       setLoading(false);
     }
   };
@@ -212,24 +185,24 @@ const UploadForm = () => {
       style={{ backgroundImage: `url(${BackgroundImage})` }}
     >
       <div className="bg-white bg-opacity-70 p-8 rounded-lg shadow-lg w-full max-w-lg">
-        <h1 className="text-3xl font-semibold text-center mb-6 text-pink-800">
-          Upload Files
-        </h1>
-        
+        <h1 className="text-3xl font-semibold text-center mb-6 text-pink-800">Upload Files</h1>
+
         {/* Backend status indicator */}
-        <div className={`text-center mb-4 ${
-          backendStatus === "online" ? "text-green-600" : 
-          backendStatus === "offline" ? "text-red-600" : 
-          "text-yellow-600"
-        }`}>
+        <div
+          className={`text-center mb-4 ${
+            backendStatus === "online"
+              ? "text-green-600"
+              : backendStatus === "offline"
+              ? "text-red-600"
+              : "text-yellow-600"
+          }`}
+        >
           Backend status: {backendStatus === "checking" ? "Checking..." : backendStatus}
         </div>
-        
+
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
-            <label className="block mb-2 text-sm text-pink-700">
-              Upload Image
-            </label>
+            <label className="block mb-2 text-sm text-pink-700">Upload Image</label>
             <input
               type="file"
               accept="image/*"
@@ -238,15 +211,13 @@ const UploadForm = () => {
               className="w-full p-3 border border-pink-300 rounded-md bg-pink-50 text-pink-700 focus:outline-none focus:ring-2 focus:ring-pink-400"
             />
             {image && (
-              <p className="mt-1 text-xs text-gray-500">
+              <p classFOR="mt-1 text-xs text-gray-500">
                 Selected file: {image.name} ({(image.size / 1024).toFixed(2)} KB)
               </p>
             )}
           </div>
           <div>
-            <label className="block mb-2 text-sm text-pink-700">
-              Upload JSON File
-            </label>
+            <label className="block mb-2 text-sm text-pink-700">Upload JSON File</label>
             <input
               type="file"
               accept=".json"
@@ -281,14 +252,16 @@ const UploadForm = () => {
         {imageUrl && (
           <div className="mt-6">
             <h3 className="font-semibold text-pink-800 mb-2">Segmented Image:</h3>
-            <img 
-              src={imageUrl} 
-              alt="Segmented Result" 
+            <img
+              src={imageUrl}
+              alt="Segmented Result"
               className="w-full rounded-md shadow-sm"
               onError={(e) => {
                 console.error("Image failed to load");
-                e.target.style.display = 'none';
-                setError(prev => prev ? `${prev}\nFailed to load the segmented image.` : "Failed to load the segmented image.");
+                e.target.style.display = "none";
+                setError((prev) =>
+                  prev ? `${prev}\nFailed to load the segmented image.` : "Failed to load the segmented image."
+                );
               }}
             />
           </div>
@@ -306,16 +279,16 @@ const UploadForm = () => {
             </ul>
           </div>
         )}
-        
+
         {relatedImages.length > 0 && (
           <div className="mt-6">
             <h3 className="font-semibold text-pink-800 mb-2">Related Images:</h3>
             <div className="grid grid-cols-2 gap-2">
               {relatedImages.map((img, index) => (
-                <img 
-                  key={index} 
-                  src={img} 
-                  alt={`Related ${index + 1}`} 
+                <img
+                  key={index}
+                  src={img}
+                  alt={`Related ${index + 1}`}
                   className="w-full h-32 object-cover rounded-md"
                 />
               ))}
