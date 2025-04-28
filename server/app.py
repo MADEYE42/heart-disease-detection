@@ -7,9 +7,11 @@ from segmentation import load_json_and_image, draw_segmentation
 from prediction import predict_single_image, load_model
 from PIL import Image
 import torch
+from flask_cors import CORS
 import logging
 from time import time
-from flask_cors import CORS
+import gc  # For garbage collection
+import uuid
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -17,26 +19,21 @@ logging.basicConfig(level=logging.INFO)
 # Initialize Flask app
 app = Flask(__name__)
 
-# Define your allowed origins
-ALLOWED_ORIGINS = [
-    "https://heart-disease-detection-5uktr7ulx-gouresh-madyes-projects.vercel.app",
-    "http://localhost:3000",  # For local development
-    "http://localhost:5173"   # For Vite development server
-]
-
-# Configure CORS properly - this is crucial
+# Enable CORS with more specific configuration
 CORS(app, 
-     origins=ALLOWED_ORIGINS,
-     supports_credentials=True,
+     resources={r"/*": {"origins": "*"}},
+     supports_credentials=False,
      allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
-     methods=["GET", "POST", "OPTIONS"],
-     expose_headers=["Content-Type", "X-Requested-With"])
+     methods=["GET", "POST", "OPTIONS"])
 
 # Directory for file uploads and results
 UPLOAD_FOLDER = 'uploads'
 RESULTS_FOLDER = 'results'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(RESULTS_FOLDER, exist_ok=True)
+
+# Constants for image processing
+MAX_IMAGE_DIMENSION = 1024  # Maximum image dimension for processing
 
 # Global variables for model
 model = None
@@ -55,22 +52,43 @@ def initialize_model():
         logging.error(f"Failed to load model: {str(e)}")
         return False
 
-# Ensure CORS headers are added to every response
+# Function to resize large images
+def resize_image_if_needed(image_path):
+    try:
+        img = cv2.imread(image_path)
+        if img is None:
+            logging.error(f"Failed to read image: {image_path}")
+            return None
+            
+        h, w = img.shape[:2]
+        original_size = f"{w}x{h}"
+        
+        # Only resize if the image is larger than MAX_IMAGE_DIMENSION
+        if max(h, w) > MAX_IMAGE_DIMENSION:
+            scale = MAX_IMAGE_DIMENSION / max(h, w)
+            new_h, new_w = int(h * scale), int(w * scale)
+            logging.info(f"Resizing image from {original_size} to {new_w}x{new_h}")
+            img = cv2.resize(img, (new_w, new_h))
+            cv2.imwrite(image_path, img)  # Save resized image
+            
+        return img
+    except Exception as e:
+        logging.error(f"Error resizing image: {str(e)}")
+        return None
+
+# Clean up memory
+def cleanup_memory():
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    gc.collect()
+
+# Explicitly set CORS headers for all responses
 @app.after_request
 def after_request(response):
-    origin = request.headers.get('Origin')
-    
-    # If the origin is in our allowed list, set it specifically
-    if origin in ALLOWED_ORIGINS:
-        response.headers.add('Access-Control-Allow-Origin', origin)
-    else:
-        # For development purposes, you could use a wildcard
-        # In production, it's better to be specific
-        response.headers.add('Access-Control-Allow-Origin', ALLOWED_ORIGINS[0])
-        
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
-    response.headers.add('Access-Control-Allow-Credentials', 'true')
+    response.headers.set('Access-Control-Allow-Origin', '*')
+    response.headers.set('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
+    response.headers.set('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    response.headers.set('Access-Control-Max-Age', '3600')  # Cache preflight requests for 1 hour
     return response
 
 # Route for health check
@@ -90,16 +108,16 @@ def health_check():
             return jsonify({"status": "unhealthy", "model": "failed to load"}), 500
     return jsonify({"status": "healthy", "model": "already loaded"})
 
-# Handle OPTIONS requests explicitly for all routes
-@app.route('/upload', methods=['OPTIONS'])
-def handle_options():
-    response = jsonify({'status': 'ok'})
-    return response
-
 # Route for uploading image and JSON files
-@app.route('/upload', methods=['POST'])
+@app.route('/upload', methods=['POST', 'OPTIONS'])
 def upload_files():
     start_time = time()
+    
+    # Handle preflight OPTIONS requests explicitly
+    if request.method == 'OPTIONS':
+        response = app.make_default_options_response()
+        logging.info(f"OPTIONS /upload processed in {time() - start_time:.3f} seconds")
+        return response
         
     try:
         # Check if model is loaded and load if needed
@@ -126,7 +144,6 @@ def upload_files():
             return response
 
         # Generate unique filenames to avoid conflicts
-        import uuid
         unique_id = str(uuid.uuid4())
         image_filename = f"{unique_id}_{image_file.filename}"
         json_filename = f"{unique_id}_{json_file.filename}"
@@ -139,6 +156,13 @@ def upload_files():
         json_file.save(json_path)
         
         logging.info(f"Files saved: {image_path}, {json_path}")
+
+        # Resize image if needed
+        resized_image = resize_image_if_needed(image_path)
+        if resized_image is None:
+            response = jsonify({"error": "Failed to process image"}), 400
+            logging.info(f"POST /upload failed (image processing) in {time() - start_time:.3f} seconds")
+            return response
 
         # Load the JSON and Image
         data, image = load_json_and_image(json_path, image_path)
@@ -161,7 +185,10 @@ def upload_files():
         
         logging.info(f"Segmented image saved at: {segmented_image_path}")
 
-        # Perform Prediction - Add timeout or make this more efficient
+        # Clean up memory before prediction
+        cleanup_memory()
+
+        # Perform Prediction
         try:
             classes = ["3VT", "ARSA", "AVSD", "Dilated Cardiac Sinus", "ECIF", "HLHS", "LVOT", "Normal Heart", "TGA", "VSD"]
             predictions = predict_single_image(segmented_image_path, model, classes, torch.device("cpu"))
@@ -172,6 +199,9 @@ def upload_files():
                 return response
                 
             logging.info(f"Predictions: {predictions}")
+            
+            # Clean up memory after prediction
+            cleanup_memory()
             
             # Return results to frontend
             response = jsonify({
@@ -193,12 +223,17 @@ def upload_files():
         response = jsonify({"error": str(e)}), 500
         logging.info(f"POST /upload failed (general exception) in {time() - start_time:.3f} seconds")
         return response
+    finally:
+        # Always clean up memory at the end
+        cleanup_memory()
 
 # Route to serve the segmented images
 @app.route('/results/<filename>')
 def serve_result(filename):
     start_time = time()
     response = send_from_directory(RESULTS_FOLDER, filename)
+    # Add CORS headers specifically for image results
+    response.headers.set('Access-Control-Allow-Origin', '*')
     logging.info(f"GET /results/{filename} processed in {time() - start_time:.3f} seconds")
     return response
 
@@ -207,6 +242,8 @@ def serve_result(filename):
 def serve_upload(filename):
     start_time = time()
     response = send_from_directory(UPLOAD_FOLDER, filename)
+    # Add CORS headers specifically for uploaded files
+    response.headers.set('Access-Control-Allow-Origin', '*')
     logging.info(f"GET /uploads/{filename} processed in {time() - start_time:.3f} seconds")
     return response
 
