@@ -6,7 +6,8 @@ import BackgroundImage from "../assets/Background.png";
 // Backend URL (remove trailing slash)
 const BACKEND_URL = "https://heart-disease-detection-vwnf.onrender.com";
 const MAX_RETRIES = 3;
-const RETRY_DELAY = 3000; 
+const BASE_RETRY_DELAY = 3000; // Base delay before exponential backoff
+const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB in bytes
 
 const UploadForm = () => {
   const [image, setImage] = useState(null);
@@ -15,6 +16,7 @@ const UploadForm = () => {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [retries, setRetries] = useState(0);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [relatedImages, setRelatedImages] = useState([]);
   const [imageUrl, setImageUrl] = useState(null);
   const [backendStatus, setBackendStatus] = useState("checking");
@@ -23,10 +25,7 @@ const UploadForm = () => {
   useEffect(() => {
     const checkBackendStatus = async () => {
       try {
-        const response = await axios.get(`${BACKEND_URL}/health`, { 
-          timeout: 10000,
-          withCredentials: true
-        });
+        const response = await axios.get(`${BACKEND_URL}/health`, { timeout: 10000 });
         if (response.data && response.data.status === "healthy") {
           setBackendStatus("online");
           console.log("Backend is online and healthy");
@@ -41,6 +40,10 @@ const UploadForm = () => {
     };
     
     checkBackendStatus();
+    
+    // Set up interval to periodically check backend status
+    const interval = setInterval(checkBackendStatus, 60000); // Check every minute
+    return () => clearInterval(interval);
   }, []);
 
   const loadRelatedImages = (className) => {
@@ -58,13 +61,38 @@ const UploadForm = () => {
     }
   };
 
+  const validateFiles = () => {
+    if (!image || !jsonFile) {
+      setError("Please select both an image and a JSON file.");
+      return false;
+    }
+    
+    // Check file size
+    if (image.size > MAX_FILE_SIZE) {
+      setError(`Image file is too large (${(image.size / 1024 / 1024).toFixed(2)}MB). Maximum allowed size is ${MAX_FILE_SIZE / 1024 / 1024}MB.`);
+      return false;
+    }
+    
+    // Check file types
+    if (!image.type.startsWith('image/')) {
+      setError("Please select a valid image file.");
+      return false;
+    }
+    
+    if (jsonFile.type !== 'application/json' && !jsonFile.name.endsWith('.json')) {
+      setError("Please select a valid JSON file.");
+      return false;
+    }
+    
+    return true;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     console.log("Form submitted");
 
-    // Validate files are selected
-    if (!image || !jsonFile) {
-      setError("Please select both an image and a JSON file.");
+    // Validate files
+    if (!validateFiles()) {
       return;
     }
 
@@ -80,6 +108,7 @@ const UploadForm = () => {
     setRelatedImages([]);
     setImageUrl(null);
     setRetries(0);
+    setUploadProgress(0);
     
     await uploadFiles();
   };
@@ -95,7 +124,31 @@ const UploadForm = () => {
       console.log(pair[0], pair[1]);
     }
 
+    // Calculate exponential backoff delay
+    const retryDelay = BASE_RETRY_DELAY * Math.pow(2, retries);
+
     try {
+      // Make a preflight request first to check CORS setup
+      if (retries === 0) {
+        try {
+          console.log(`Sending OPTIONS preflight request to ${BACKEND_URL}/upload`);
+          await axios({
+            method: 'OPTIONS',
+            url: `${BACKEND_URL}/upload`,
+            headers: {
+              'Origin': window.location.origin,
+              'Access-Control-Request-Method': 'POST',
+              'Access-Control-Request-Headers': 'content-type,x-requested-with'
+            },
+            timeout: 5000
+          });
+          console.log("Preflight request successful");
+        } catch (preflightErr) {
+          console.warn("Preflight request failed:", preflightErr);
+          // Continue anyway, the actual request might work
+        }
+      }
+
       console.log(`Sending POST request to ${BACKEND_URL}/upload (attempt ${retries + 1})...`);
       const response = await axios.post(
         `${BACKEND_URL}/upload`,
@@ -103,17 +156,20 @@ const UploadForm = () => {
         {
           headers: { 
             "Content-Type": "multipart/form-data",
+            "X-Requested-With": "XMLHttpRequest"
           },
-          withCredentials: true,  // Important for CORS with credentials
-          timeout: 120000, // 120 seconds (increased timeout)
+          withCredentials: false,  // Keep this false for cross-origin requests
+          timeout: 120000, // 2 minutes
+          onUploadProgress: (progressEvent) => {
+            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            setUploadProgress(percentCompleted);
+          },
+          // Added validateStatus to handle non-2xx responses properly
           validateStatus: function (status) {
             return status >= 200 && status < 600; // Accept all status codes for better error handling
           }
         }
       );
-
-      // Log the complete response for debugging
-      console.log("Full response:", response);
 
       // Check if the response has an error status
       if (response.status >= 400) {
@@ -124,6 +180,9 @@ const UploadForm = () => {
       }
 
       console.log("Response from backend:", response.data);
+      
+      // Reset upload progress after successful upload
+      setUploadProgress(0);
       
       // Process predictions if available
       if (response.data.predictions) {
@@ -159,27 +218,36 @@ const UploadForm = () => {
       console.error("Error during upload:", err);
       console.log("Error details:", err.config, err.response);
       
-      if (err.code === "ECONNABORTED") {
+      // Handle different types of errors
+      if (err.code === "ECONNABORTED" || err.code === "ERR_NETWORK") {
+        // Handle timeout or network errors with retries and exponential backoff
         if (retries < MAX_RETRIES) {
-          console.log(`Request timed out. Retrying in ${RETRY_DELAY/1000} seconds...`);
-          setError(`Request timed out. Retrying (${retries + 1}/${MAX_RETRIES})...`);
+          console.log(`Request failed. Retrying in ${retryDelay/1000} seconds...`);
+          setError(`Request failed. Retrying (${retries + 1}/${MAX_RETRIES}) in ${retryDelay/1000}s...`);
           
           setRetries(prev => prev + 1);
           setTimeout(() => {
             uploadFiles();
-          }, RETRY_DELAY);
+          }, retryDelay);
           return;
         } else {
-          setError("The server is taking too long to respond. The operation might be too resource-intensive. Please try with a smaller image or try again later.");
+          setError("The server is taking too long to respond. Please try with a smaller image or try again later.");
         }
-      } else if (err.code === "ERR_NETWORK") {
-        setError("Network error: The server is unreachable. This may be due to CORS issues or the server being down. Please check your internet connection or try again later.");
+      } else if (err.response && err.response.status === 429) {
+        // Handle rate limiting
+        setError("Server is busy. Please wait a moment and try again.");
+      } else if (err.response && err.response.status === 413) {
+        // Handle payload too large
+        setError("Image file is too large. Please use a smaller image.");
       } else if (err.response) {
+        // Handle other response errors
         const errorMsg = err.response.data?.error || err.response.statusText || "Unknown error";
         setError(`Server error (${err.response.status}): ${errorMsg}`);
       } else if (err.request) {
+        // Handle no response
         setError("No response from server. The server might be overloaded or down. Please try again later.");
       } else {
+        // Handle general errors
         setError(`Error: ${err.message || "Unknown error occurred"}`);
       }
       
@@ -187,30 +255,27 @@ const UploadForm = () => {
     }
   };
 
-  // Function to retry connecting to backend
-  const retryConnection = () => {
-    setBackendStatus("checking");
-    
-    const checkBackendStatus = async () => {
-      try {
-        const response = await axios.get(`${BACKEND_URL}/health`, { 
-          timeout: 10000,
-          withCredentials: true
-        });
-        if (response.data && response.data.status === "healthy") {
-          setBackendStatus("online");
-          console.log("Backend is online and healthy");
-        } else {
-          setBackendStatus("unhealthy");
-          console.warn("Backend is responding but unhealthy");
-        }
-      } catch (err) {
-        console.error("Error checking backend status:", err);
-        setBackendStatus("offline");
+  // Handle file input change
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setImage(file);
+      // Reset error if it was related to the image
+      if (error && (error.includes("image") || error.includes("Image"))) {
+        setError(null);
       }
-    };
-    
-    checkBackendStatus();
+    }
+  };
+
+  const handleJsonChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setJsonFile(file);
+      // Reset error if it was related to the JSON file
+      if (error && error.includes("JSON")) {
+        setError(null);
+      }
+    }
   };
 
   return (
@@ -223,23 +288,13 @@ const UploadForm = () => {
           Heart Disease Detection
         </h1>
         
-        {/* Backend status indicator with retry button */}
-        <div className="flex items-center justify-center mb-4">
-          <div className={`text-center mr-2 ${
-            backendStatus === "online" ? "text-green-600" : 
-            backendStatus === "offline" ? "text-red-600" : 
-            "text-yellow-600"
-          }`}>
-            Backend status: {backendStatus === "checking" ? "Checking..." : backendStatus}
-          </div>
-          {backendStatus !== "checking" && backendStatus !== "online" && (
-            <button 
-              onClick={retryConnection}
-              className="text-sm bg-blue-500 hover:bg-blue-600 text-white py-1 px-3 rounded"
-            >
-              Retry
-            </button>
-          )}
+        {/* Backend status indicator */}
+        <div className={`text-center mb-4 ${
+          backendStatus === "online" ? "text-green-600" : 
+          backendStatus === "offline" ? "text-red-600" : 
+          "text-yellow-600"
+        }`}>
+          Backend status: {backendStatus === "checking" ? "Checking..." : backendStatus}
         </div>
         
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -250,7 +305,7 @@ const UploadForm = () => {
             <input
               type="file"
               accept="image/*"
-              onChange={(e) => setImage(e.target.files[0])}
+              onChange={handleImageChange}
               required
               className="w-full p-3 border border-pink-300 rounded-md bg-pink-50 text-pink-700 focus:outline-none focus:ring-2 focus:ring-pink-400"
             />
@@ -267,7 +322,7 @@ const UploadForm = () => {
             <input
               type="file"
               accept=".json"
-              onChange={(e) => setJsonFile(e.target.files[0])}
+              onChange={handleJsonChange}
               required
               className="w-full p-3 border border-pink-300 rounded-md bg-pink-50 text-pink-700 focus:outline-none focus:ring-2 focus:ring-pink-400"
             />
@@ -277,6 +332,18 @@ const UploadForm = () => {
               </p>
             )}
           </div>
+          
+          {/* Upload progress bar */}
+          {loading && uploadProgress > 0 && (
+            <div className="w-full bg-gray-200 rounded-full h-2.5 mb-4">
+              <div 
+                className="bg-pink-500 h-2.5 rounded-full" 
+                style={{ width: `${uploadProgress}%` }}
+              ></div>
+              <p className="text-xs text-gray-500 mt-1">Upload progress: {uploadProgress}%</p>
+            </div>
+          )}
+          
           <button
             type="submit"
             disabled={loading || backendStatus !== "online"}
@@ -317,7 +384,8 @@ const UploadForm = () => {
             <ul className="list-disc pl-5 text-pink-700">
               {predictions.map((pred, index) => (
                 <li key={index}>
-                  {pred.class}: {pred.probability.toFixed(2)}%
+                  <span className="font-medium">{pred.class}:</span> {pred.probability.toFixed(2)}%
+                  {index === 0 && <span className="ml-2 text-xs bg-pink-200 px-1 rounded">Highest</span>}
                 </li>
               ))}
             </ul>
