@@ -4,7 +4,7 @@ import axios from "axios";
 import BackgroundImage from "../assets/Background.png";
 
 // Backend URL (remove trailing slash)
-const BACKEND_URL = "http://0.0.0.0:10000";
+const BACKEND_URL = "https://heart-disease-detection-vwnf.onrender.com";
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 3000; 
 
