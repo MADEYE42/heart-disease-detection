@@ -3,42 +3,47 @@ import os
 import json
 import cv2
 import numpy as np
-from segmentation import load_json_and_image, draw_segmentation
-from prediction import predict_single_image, load_model
 from PIL import Image
 import torch
-from flask_cors import CORS
 import logging
-from time import time
-import gc  # For garbage collection
 import uuid
+from time import time
+from flask_cors import CORS
 
-# Set up logging
+# Import your modules here
+from segmentation import load_json_and_image, draw_segmentation
+from prediction import predict_single_image, load_model
+
+# Setup Logging
 logging.basicConfig(level=logging.INFO)
 
-# Initialize Flask app
+# Initialize Flask App
 app = Flask(__name__)
 
-# Enable CORS with more specific configuration
-CORS(app, 
-     resources={r"/*": {"origins": "*"}},
+# Enable CORS with explicit origin instead of wildcard for better security
+CORS(app,
+     origins=["https://heart-disease-detection-5uktr7ulx-gouresh-madyes-projects.vercel.app"],
      supports_credentials=False,
      allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
      methods=["GET", "POST", "OPTIONS"])
 
-# Directory for file uploads and results
+# Fallback: Add CORS headers manually to ensure they're included in all responses
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', 'https://heart-disease-detection-5uktr7ulx-gouresh-madyes-projects.vercel.app')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,X-Requested-With')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+    return response
+
+# Upload and Results Directory
 UPLOAD_FOLDER = 'uploads'
 RESULTS_FOLDER = 'results'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(RESULTS_FOLDER, exist_ok=True)
 
-# Constants for image processing
-MAX_IMAGE_DIMENSION = 1024  # Maximum image dimension for processing
-
-# Global variables for model
+# Load Model Globally
 model = None
 
-# Load the model
 def initialize_model():
     global model
     try:
@@ -52,205 +57,87 @@ def initialize_model():
         logging.error(f"Failed to load model: {str(e)}")
         return False
 
-# Function to resize large images
-def resize_image_if_needed(image_path):
-    try:
-        img = cv2.imread(image_path)
-        if img is None:
-            logging.error(f"Failed to read image: {image_path}")
-            return None
-            
-        h, w = img.shape[:2]
-        original_size = f"{w}x{h}"
-        
-        # Only resize if the image is larger than MAX_IMAGE_DIMENSION
-        if max(h, w) > MAX_IMAGE_DIMENSION:
-            scale = MAX_IMAGE_DIMENSION / max(h, w)
-            new_h, new_w = int(h * scale), int(w * scale)
-            logging.info(f"Resizing image from {original_size} to {new_w}x{new_h}")
-            img = cv2.resize(img, (new_w, new_h))
-            cv2.imwrite(image_path, img)  # Save resized image
-            
-        return img
-    except Exception as e:
-        logging.error(f"Error resizing image: {str(e)}")
-        return None
-
-# Clean up memory
-def cleanup_memory():
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-    gc.collect()
-
-# Explicitly set CORS headers for all responses
-@app.after_request
-def after_request(response):
-    response.headers.set('Access-Control-Allow-Origin', '*')
-    response.headers.set('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
-    response.headers.set('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-    response.headers.set('Access-Control-Max-Age', '3600')  # Cache preflight requests for 1 hour
-    return response
-
-# Route for health check
-@app.route('/', methods=['GET'])
-def root():
-    response = jsonify({"status": "service is running"})
-    return response
-
+# Health Check
 @app.route('/health', methods=['GET'])
 def health_check():
     global model
     if model is None:
         success = initialize_model()
-        if success:
-            return jsonify({"status": "healthy", "model": "loaded"})
-        else:
+        if not success:
             return jsonify({"status": "unhealthy", "model": "failed to load"}), 500
-    return jsonify({"status": "healthy", "model": "already loaded"})
+    return jsonify({"status": "healthy", "model": "loaded"})
 
-# Route for uploading image and JSON files
+# Upload Endpoint
 @app.route('/upload', methods=['POST', 'OPTIONS'])
 def upload_files():
     start_time = time()
-    
-    # Handle preflight OPTIONS requests explicitly
+
+    # Handle OPTIONS preflight
     if request.method == 'OPTIONS':
-        response = app.make_default_options_response()
-        logging.info(f"OPTIONS /upload processed in {time() - start_time:.3f} seconds")
-        return response
-        
+        return app.make_default_options_response()
+
     try:
-        # Check if model is loaded and load if needed
+        # Ensure model is loaded
         global model
         if model is None:
             success = initialize_model()
             if not success:
-                response = jsonify({'error': 'Failed to load model. Please check server logs.'}), 503
-                logging.info(f"POST /upload rejected (model loading failed) in {time() - start_time:.3f} seconds")
-                return response
-        
-        # Check if files are included
+                return jsonify({"error": "Model failed to load"}), 503
+
+        # Validate uploaded files
         if 'image' not in request.files or 'json' not in request.files:
-            response = jsonify({'error': 'No image or JSON file part in the request'}), 400
-            logging.info(f"POST /upload failed (missing files) in {time() - start_time:.3f} seconds")
-            return response
-        
+            return jsonify({'error': 'Missing image or JSON file'}), 400
+
         image_file = request.files['image']
         json_file = request.files['json']
-        
+
         if image_file.filename == '' or json_file.filename == '':
-            response = jsonify({'error': 'No file selected'}), 400
-            logging.info(f"POST /upload failed (empty filename) in {time() - start_time:.3f} seconds")
-            return response
+            return jsonify({'error': 'Empty filename'}), 400
 
-        # Generate unique filenames to avoid conflicts
-        unique_id = str(uuid.uuid4())
-        image_filename = f"{unique_id}_{image_file.filename}"
-        json_filename = f"{unique_id}_{json_file.filename}"
-        
-        # Save the uploaded files
-        image_path = os.path.join(UPLOAD_FOLDER, image_filename)
-        json_path = os.path.join(UPLOAD_FOLDER, json_filename)
-        
-        image_file.save(image_path)
+        # Save files with unique names
+        uid = str(uuid.uuid4())
+        img_path = os.path.join(UPLOAD_FOLDER, f"{uid}_{image_file.filename}")
+        json_path = os.path.join(UPLOAD_FOLDER, f"{uid}_{json_file.filename}")
+
+        image_file.save(img_path)
         json_file.save(json_path)
-        
-        logging.info(f"Files saved: {image_path}, {json_path}")
 
-        # Resize image if needed
-        resized_image = resize_image_if_needed(image_path)
-        if resized_image is None:
-            response = jsonify({"error": "Failed to process image"}), 400
-            logging.info(f"POST /upload failed (image processing) in {time() - start_time:.3f} seconds")
-            return response
-
-        # Load the JSON and Image
-        data, image = load_json_and_image(json_path, image_path)
+        # Load data
+        data, image = load_json_and_image(json_path, img_path)
         if data is None or image is None:
-            response = jsonify({"error": "Failed to load files"}), 400
-            logging.info(f"POST /upload failed (file loading) in {time() - start_time:.3f} seconds")
-            return response
+            return jsonify({"error": "Failed to load files"}), 400
 
-        # Perform Segmentation
+        # Segmentation
         segmented_image = draw_segmentation(data, image)
         if segmented_image is None:
-            response = jsonify({"error": "Segmentation failed"}), 500
-            logging.info(f"POST /upload failed (segmentation) in {time() - start_time:.3f} seconds")
-            return response
+            return jsonify({"error": "Segmentation failed"}), 500
 
-        # Save the segmented image with unique name
-        segmented_image_filename = f"segmented_{unique_id}.jpg"
-        segmented_image_path = os.path.join(RESULTS_FOLDER, segmented_image_filename)
-        cv2.imwrite(segmented_image_path, segmented_image)
-        
-        logging.info(f"Segmented image saved at: {segmented_image_path}")
+        seg_path = os.path.join(RESULTS_FOLDER, f"segmented_{uid}.jpg")
+        cv2.imwrite(seg_path, segmented_image)
 
-        # Clean up memory before prediction
-        cleanup_memory()
+        # Prediction
+        classes = ["3VT", "ARSA", "AVSD", "Dilated Cardiac Sinus", "ECIF", "HLHS", "LVOT", "Normal Heart", "TGA", "VSD"]
+        predictions = predict_single_image(seg_path, model, classes, torch.device("cpu"))
 
-        # Perform Prediction
-        try:
-            classes = ["3VT", "ARSA", "AVSD", "Dilated Cardiac Sinus", "ECIF", "HLHS", "LVOT", "Normal Heart", "TGA", "VSD"]
-            predictions = predict_single_image(segmented_image_path, model, classes, torch.device("cpu"))
-            
-            if predictions is None:
-                response = jsonify({"error": "Prediction failed"}), 500
-                logging.info(f"POST /upload failed (prediction) in {time() - start_time:.3f} seconds")
-                return response
-                
-            logging.info(f"Predictions: {predictions}")
-            
-            # Clean up memory after prediction
-            cleanup_memory()
-            
-            # Return results to frontend
-            response = jsonify({
-                "predictions": predictions,
-                "annotations": data["shapes"],
-                "segmented_image": f'/results/{segmented_image_filename}'
-            })
-            logging.info(f"POST /upload completed in {time() - start_time:.3f} seconds")
-            return response
-            
-        except Exception as e:
-            logging.error(f"Prediction error: {str(e)}")
-            response = jsonify({"error": f"Prediction error: {str(e)}"}), 500
-            logging.info(f"POST /upload failed (prediction exception) in {time() - start_time:.3f} seconds")
-            return response
+        if predictions is None:
+            return jsonify({"error": "Prediction failed"}), 500
+
+        return jsonify({
+            "predictions": predictions,
+            "annotations": data["shapes"],
+            "segmented_image": f'/results/segmented_{uid}.jpg'
+        })
 
     except Exception as e:
-        logging.error(f"Error in upload process: {str(e)}")
-        response = jsonify({"error": str(e)}), 500
-        logging.info(f"POST /upload failed (general exception) in {time() - start_time:.3f} seconds")
-        return response
-    finally:
-        # Always clean up memory at the end
-        cleanup_memory()
+        logging.error(f"Upload error: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
-# Route to serve the segmented images
+# Serve results
 @app.route('/results/<filename>')
 def serve_result(filename):
-    start_time = time()
-    response = send_from_directory(RESULTS_FOLDER, filename)
-    # Add CORS headers specifically for image results
-    response.headers.set('Access-Control-Allow-Origin', '*')
-    logging.info(f"GET /results/{filename} processed in {time() - start_time:.3f} seconds")
-    return response
+    return send_from_directory(RESULTS_FOLDER, filename)
 
-# Route to serve uploaded files (if needed)
-@app.route('/uploads/<filename>')
-def serve_upload(filename):
-    start_time = time()
-    response = send_from_directory(UPLOAD_FOLDER, filename)
-    # Add CORS headers specifically for uploaded files
-    response.headers.set('Access-Control-Allow-Origin', '*')
-    logging.info(f"GET /uploads/{filename} processed in {time() - start_time:.3f} seconds")
-    return response
-
-# Try to initialize the model when the application starts
-initialize_model()
-
-# For local development only - not used on Render
+# Run App
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
