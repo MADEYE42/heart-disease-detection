@@ -11,21 +11,23 @@ from flask_cors import CORS
 import logging
 from time import time
 
-# Download model if needed
-try:
-    from model_download import download_model
-    download_model()
-except Exception as e:
-    logging.error(f"Model download failed: {str(e)}")
-
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 
 # Initialize Flask app
 app = Flask(__name__)
 
-# Enable CORS for all domains
-CORS(app, supports_credentials=False)
+# Enable CORS with specific origins
+CORS(app, 
+     resources={r"/*": {"origins": [
+         "https://heart-disease-detection-6d3a4y9rk-gouresh-madyes-projects.vercel.app",
+         "https://*.vercel.app",  # Allow all subdomains from vercel.app
+         "http://localhost:3000",  # For local development
+         "http://localhost:5173"   # For Vite development server
+     ]}},
+     supports_credentials=False,
+     allow_headers=["Content-Type", "Authorization"],
+     methods=["GET", "POST", "OPTIONS"])
 
 # Directory for file uploads and results
 UPLOAD_FOLDER = 'uploads'
@@ -50,17 +52,11 @@ def initialize_model():
         logging.error(f"Failed to load model: {str(e)}")
         return False
 
-# Helper function to add CORS headers to all responses
-def add_cors_headers(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-    return response
-
 # Route for health check
 @app.route('/', methods=['GET'])
 def root():
-    return jsonify({"status": "service is running"})
+    response = jsonify({"status": "service is running"})
+    return response
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -77,11 +73,12 @@ def health_check():
 @app.route('/upload', methods=['POST', 'OPTIONS'])
 def upload_files():
     start_time = time()
+    
     # Handle preflight OPTIONS requests
     if request.method == 'OPTIONS':
         response = app.make_default_options_response()
         logging.info(f"OPTIONS /upload processed in {time() - start_time:.3f} seconds")
-        return add_cors_headers(response)
+        return response
         
     try:
         # Check if model is loaded and load if needed
@@ -91,13 +88,13 @@ def upload_files():
             if not success:
                 response = jsonify({'error': 'Failed to load model. Please check server logs.'}), 503
                 logging.info(f"POST /upload rejected (model loading failed) in {time() - start_time:.3f} seconds")
-                return add_cors_headers(response[0]), response[1]
+                return response
         
         # Check if files are included
         if 'image' not in request.files or 'json' not in request.files:
             response = jsonify({'error': 'No image or JSON file part in the request'}), 400
             logging.info(f"POST /upload failed (missing files) in {time() - start_time:.3f} seconds")
-            return add_cors_headers(response[0]), response[1]
+            return response
         
         image_file = request.files['image']
         json_file = request.files['json']
@@ -105,7 +102,7 @@ def upload_files():
         if image_file.filename == '' or json_file.filename == '':
             response = jsonify({'error': 'No file selected'}), 400
             logging.info(f"POST /upload failed (empty filename) in {time() - start_time:.3f} seconds")
-            return add_cors_headers(response[0]), response[1]
+            return response
 
         # Generate unique filenames to avoid conflicts
         import uuid
@@ -127,14 +124,14 @@ def upload_files():
         if data is None or image is None:
             response = jsonify({"error": "Failed to load files"}), 400
             logging.info(f"POST /upload failed (file loading) in {time() - start_time:.3f} seconds")
-            return add_cors_headers(response[0]), response[1]
+            return response
 
         # Perform Segmentation
         segmented_image = draw_segmentation(data, image)
         if segmented_image is None:
             response = jsonify({"error": "Segmentation failed"}), 500
             logging.info(f"POST /upload failed (segmentation) in {time() - start_time:.3f} seconds")
-            return add_cors_headers(response[0]), response[1]
+            return response
 
         # Save the segmented image with unique name
         segmented_image_filename = f"segmented_{unique_id}.jpg"
@@ -151,7 +148,7 @@ def upload_files():
             if predictions is None:
                 response = jsonify({"error": "Prediction failed"}), 500
                 logging.info(f"POST /upload failed (prediction) in {time() - start_time:.3f} seconds")
-                return add_cors_headers(response[0]), response[1]
+                return response
                 
             logging.info(f"Predictions: {predictions}")
             
@@ -162,19 +159,19 @@ def upload_files():
                 "segmented_image": f'/results/{segmented_image_filename}'
             })
             logging.info(f"POST /upload completed in {time() - start_time:.3f} seconds")
-            return add_cors_headers(response)
+            return response
             
         except Exception as e:
             logging.error(f"Prediction error: {str(e)}")
             response = jsonify({"error": f"Prediction error: {str(e)}"}), 500
             logging.info(f"POST /upload failed (prediction exception) in {time() - start_time:.3f} seconds")
-            return add_cors_headers(response[0]), response[1]
+            return response
 
     except Exception as e:
         logging.error(f"Error in upload process: {str(e)}")
         response = jsonify({"error": str(e)}), 500
         logging.info(f"POST /upload failed (general exception) in {time() - start_time:.3f} seconds")
-        return add_cors_headers(response[0]), response[1]
+        return response
 
 # Route to serve the segmented images
 @app.route('/results/<filename>')
@@ -182,7 +179,7 @@ def serve_result(filename):
     start_time = time()
     response = send_from_directory(RESULTS_FOLDER, filename)
     logging.info(f"GET /results/{filename} processed in {time() - start_time:.3f} seconds")
-    return add_cors_headers(response)
+    return response
 
 # Route to serve uploaded files (if needed)
 @app.route('/uploads/<filename>')
@@ -190,15 +187,7 @@ def serve_upload(filename):
     start_time = time()
     response = send_from_directory(UPLOAD_FOLDER, filename)
     logging.info(f"GET /uploads/{filename} processed in {time() - start_time:.3f} seconds")
-    return add_cors_headers(response)
-
-# Add OPTIONS handling for all routes to support CORS preflight requests
-@app.route('/<path:path>', methods=['OPTIONS'])
-def options_handler(path):
-    start_time = time()
-    response = app.make_default_options_response()
-    logging.info(f"OPTIONS /{path} processed in {time() - start_time:.3f} seconds")
-    return add_cors_headers(response)
+    return response
 
 # Try to initialize the model when the application starts
 initialize_model()
