@@ -10,7 +10,6 @@ import torch
 from flask_cors import CORS
 import logging
 from time import time
-import threading
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -18,7 +17,7 @@ logging.basicConfig(level=logging.INFO)
 # Initialize Flask app
 app = Flask(__name__)
 
-# Enable CORS for all domains (permissive for debugging)
+# Enable CORS for all domains
 CORS(app, supports_credentials=False)
 
 # Directory for file uploads and results
@@ -27,26 +26,22 @@ RESULTS_FOLDER = 'results'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(RESULTS_FOLDER, exist_ok=True)
 
-# Global variable to track if model is loaded
-model_loaded = False
+# Global variables for model
 model = None
 
-def load_model_on_startup():
-    global model, model_loaded
+# Load the model once when imported
+def initialize_model():
+    global model
     try:
-        MODEL_PATH = "model_path.pth"
-        # Force CPU usage to avoid CUDA issues on Render
+        MODEL_PATH = os.environ.get("MODEL_PATH", "model_path.pth")
         device = torch.device("cpu")
         logging.info(f"Loading model on device: {device}")
         model = load_model(MODEL_PATH, num_classes=10, device=device)
-        model_loaded = True
         logging.info("Model loaded successfully")
+        return True
     except Exception as e:
         logging.error(f"Failed to load model: {str(e)}")
-        model_loaded = False
-
-# Start model loading in a separate thread to avoid blocking app startup
-threading.Thread(target=load_model_on_startup, daemon=True).start()
+        return False
 
 # Helper function to add CORS headers to all responses
 def add_cors_headers(response):
@@ -54,6 +49,18 @@ def add_cors_headers(response):
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     return response
+
+# Route for health check that also loads the model if needed
+@app.route('/health', methods=['GET'])
+def health_check():
+    global model
+    if model is None:
+        success = initialize_model()
+        if success:
+            return jsonify({"status": "healthy", "model": "loaded"})
+        else:
+            return jsonify({"status": "unhealthy", "model": "failed to load"}), 500
+    return jsonify({"status": "healthy", "model": "already loaded"})
 
 # Route for uploading image and JSON files
 @app.route('/upload', methods=['POST', 'OPTIONS'])
@@ -66,12 +73,14 @@ def upload_files():
         return add_cors_headers(response)
         
     try:
-        # Check if model is loaded
-        global model_loaded, model
-        if not model_loaded:
-            response = jsonify({'error': 'Model is still loading. Please try again in a few moments.'}), 503
-            logging.info(f"POST /upload rejected (model not loaded) in {time() - start_time:.3f} seconds")
-            return add_cors_headers(response[0]), response[1]
+        # Check if model is loaded and load if needed
+        global model
+        if model is None:
+            success = initialize_model()
+            if not success:
+                response = jsonify({'error': 'Failed to load model. Please check server logs.'}), 503
+                logging.info(f"POST /upload rejected (model loading failed) in {time() - start_time:.3f} seconds")
+                return add_cors_headers(response[0]), response[1]
         
         # Check if files are included
         if 'image' not in request.files or 'json' not in request.files:
@@ -181,8 +190,10 @@ def options_handler(path):
     logging.info(f"OPTIONS /{path} processed in {time() - start_time:.3f} seconds")
     return add_cors_headers(response)
 
-# Main entry point
+# Attempt to initialize the model when the application starts
 if __name__ == "__main__":
-    port =5000
+    port = int(os.environ.get("PORT", 5000))
+    # Try to load the model at startup
+    initialize_model()
     # Debug set to False for production
     app.run(host="0.0.0.0", port=port, debug=False)
