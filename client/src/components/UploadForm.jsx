@@ -53,7 +53,9 @@ const UploadForm = () => {
     await uploadFiles();
   };
   
-  const uploadFiles = async () => {
+  // Inside your UploadForm component, adjust the axios request:
+
+const uploadFiles = async () => {
     const formData = new FormData();
     formData.append("image", image);
     formData.append("json", jsonFile);
@@ -67,13 +69,25 @@ const UploadForm = () => {
           headers: { 
             "Content-Type": "multipart/form-data"
           },
-          withCredentials: false,
-          timeout: 90000 // 90 seconds
+          withCredentials: false,  // Keep this false for cross-origin requests
+          timeout: 90000, // 90 seconds
+          // Added validateStatus to handle non-2xx responses properly
+          validateStatus: function (status) {
+            return status >= 200 && status < 600; // Accept all status codes for better error handling
+          }
         }
       );
 
-      console.log("Response from backend:", response.data);
+      // Check if the response has an error status
+      if (response.status >= 400) {
+        throw { 
+          response: response,
+          message: response.data?.error || "Server error"
+        };
+      }
 
+      console.log("Response from backend:", response.data);
+      // Rest of your code remains the same...
       if (response.data.predictions) {
         setPredictions(response.data.predictions);
 
