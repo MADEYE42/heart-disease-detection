@@ -17,17 +17,13 @@ logging.basicConfig(level=logging.INFO)
 # Initialize Flask app
 app = Flask(__name__)
 
-# Enable CORS with specific origins
+# Enable CORS with more permissive configuration
 CORS(app, 
-     resources={r"/*": {"origins": [
-         "https://heart-disease-detection-6d3a4y9rk-gouresh-madyes-projects.vercel.app",
-         "https://*.vercel.app",  # Allow all subdomains from vercel.app
-         "http://localhost:3000",  # For local development
-         "http://localhost:5173"   # For Vite development server
-     ]}},
+     origins=["*"],  # Allow all origins temporarily to debug the CORS issue
      supports_credentials=False,
-     allow_headers=["Content-Type", "Authorization"],
-     methods=["GET", "POST", "OPTIONS"])
+     allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
+     methods=["GET", "POST", "OPTIONS"],
+     expose_headers=["Content-Type", "X-Requested-With"])
 
 # Directory for file uploads and results
 UPLOAD_FOLDER = 'uploads'
@@ -52,6 +48,14 @@ def initialize_model():
         logging.error(f"Failed to load model: {str(e)}")
         return False
 
+# Additional CORS headers as a backup
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+    return response
+
 # Route for health check
 @app.route('/', methods=['GET'])
 def root():
@@ -74,7 +78,7 @@ def health_check():
 def upload_files():
     start_time = time()
     
-    # Handle preflight OPTIONS requests
+    # Handle preflight OPTIONS requests explicitly
     if request.method == 'OPTIONS':
         response = app.make_default_options_response()
         logging.info(f"OPTIONS /upload processed in {time() - start_time:.3f} seconds")
@@ -178,6 +182,8 @@ def upload_files():
 def serve_result(filename):
     start_time = time()
     response = send_from_directory(RESULTS_FOLDER, filename)
+    # Add CORS headers specifically for image results
+    response.headers.add('Access-Control-Allow-Origin', '*')
     logging.info(f"GET /results/{filename} processed in {time() - start_time:.3f} seconds")
     return response
 
@@ -186,6 +192,8 @@ def serve_result(filename):
 def serve_upload(filename):
     start_time = time()
     response = send_from_directory(UPLOAD_FOLDER, filename)
+    # Add CORS headers specifically for uploaded files
+    response.headers.add('Access-Control-Allow-Origin', '*')
     logging.info(f"GET /uploads/{filename} processed in {time() - start_time:.3f} seconds")
     return response
 
