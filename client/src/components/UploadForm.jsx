@@ -38,6 +38,19 @@ const UploadForm = () => {
     };
 
     checkBackendStatus();
+
+    // Test CORS on component mount
+    const testCORS = async () => {
+      try {
+        const response = await fetch(`${BACKEND_URL}/test-cors`);
+        const data = await response.json();
+        console.log("CORS Test Result:", data);
+      } catch (error) {
+        console.error("CORS Test Error:", error);
+      }
+    };
+    testCORS();
+
   }, []);
 
   const loadRelatedImages = (className) => {
@@ -104,7 +117,6 @@ const UploadForm = () => {
           },
           withCredentials: false, // Keep this false for cross-origin requests
           timeout: 90000, // 90 seconds
-          // Added validateStatus to handle non-2xx responses properly
           validateStatus: function (status) {
             return status >= 200 && status < 600; // Accept all status codes for better error handling
           }
