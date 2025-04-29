@@ -21,8 +21,13 @@ app = Flask(__name__)
 CORS(app, resources={r"/upload": {"origins": "https://heart-disease-detection-ln3u8opjd-gouresh-madyes-projects.vercel.app",
                                    "methods": ["POST", "OPTIONS"],
                                    "allow_headers": ["Content-Type", "X-Requested-With"]}})
+# CORS for the test route
+CORS(app, resources={r"/test-cors": {"origins": "https://heart-disease-detection-ln3u8opjd-gouresh-madyes-projects.vercel.app"}})
+# CORS for serving results
 CORS(app, resources={r"/results/*": {"origins": "*"}})
+# CORS for health check
 CORS(app, resources={r"/health": {"origins": "*"}})
+# CORS for root
 CORS(app, resources={r"/": {"origins": "*"}})
 
 # Directory for file uploads and results
@@ -64,6 +69,11 @@ def health_check():
         else:
             return jsonify({"status": "unhealthy", "model": "failed to load"}), 500
     return jsonify({"status": "healthy", "model": "already loaded"})
+
+# Test CORS route
+@app.route('/test-cors', methods=['GET'])
+def test_cors():
+    return jsonify({"message": "CORS test successful"})
 
 # Route for uploading image and JSON files
 @app.route('/upload', methods=['POST', 'OPTIONS'])
