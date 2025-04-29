@@ -17,9 +17,11 @@ logging.basicConfig(level=logging.INFO)
 # Initialize Flask app
 app = Flask(__name__)
 
-# Enable CORS
-CORS(app, resources={r"/upload": {"origins": "https://heart-disease-detection-ln3u8opjd-gouresh-madyes-projects.vercel.app"}})
-CORS(app, resources={r"/results/*": {"origins": "*"}}) # Allow all origins for serving results (less strict)
+# Enable CORS with explicit configuration for /upload
+CORS(app, resources={r"/upload": {"origins": "https://heart-disease-detection-ln3u8opjd-gouresh-madyes-projects.vercel.app",
+                                   "methods": ["POST", "OPTIONS"],
+                                   "allow_headers": ["Content-Type", "X-Requested-With"]}})
+CORS(app, resources={r"/results/*": {"origins": "*"}})
 CORS(app, resources={r"/health": {"origins": "*"}})
 CORS(app, resources={r"/": {"origins": "*"}})
 
@@ -68,14 +70,12 @@ def health_check():
 def upload_files():
     start_time = time()
 
-    # Handle preflight OPTIONS requests explicitly (though Flask-CORS should handle this)
     if request.method == 'OPTIONS':
         response = app.make_default_options_response()
         logging.info(f"OPTIONS /upload processed in {time() - start_time:.3f} seconds")
         return response
 
     try:
-        # Check if model is loaded and load if needed
         global model
         if model is None:
             success = initialize_model()
@@ -84,7 +84,6 @@ def upload_files():
                 logging.info(f"POST /upload rejected (model loading failed) in {time() - start_time:.3f} seconds")
                 return response
 
-        # Check if files are included
         if 'image' not in request.files or 'json' not in request.files:
             response = jsonify({'error': 'No image or JSON file part in the request'}), 400
             logging.info(f"POST /upload failed (missing files) in {time() - start_time:.3f} seconds")
@@ -98,13 +97,11 @@ def upload_files():
             logging.info(f"POST /upload failed (empty filename) in {time() - start_time:.3f} seconds")
             return response
 
-        # Generate unique filenames to avoid conflicts
         import uuid
         unique_id = str(uuid.uuid4())
         image_filename = f"{unique_id}_{image_file.filename}"
         json_filename = f"{unique_id}_{json_file.filename}"
 
-        # Save the uploaded files
         image_path = os.path.join(UPLOAD_FOLDER, image_filename)
         json_path = os.path.join(UPLOAD_FOLDER, json_filename)
 
@@ -113,28 +110,24 @@ def upload_files():
 
         logging.info(f"Files saved: {image_path}, {json_path}")
 
-        # Load the JSON and Image
         data, image = load_json_and_image(json_path, image_path)
         if data is None or image is None:
             response = jsonify({"error": "Failed to load files"}), 400
             logging.info(f"POST /upload failed (file loading) in {time() - start_time:.3f} seconds")
             return response
 
-        # Perform Segmentation
         segmented_image = draw_segmentation(data, image)
         if segmented_image is None:
             response = jsonify({"error": "Segmentation failed"}), 500
             logging.info(f"POST /upload failed (segmentation) in {time() - start_time:.3f} seconds")
             return response
 
-        # Save the segmented image with unique name
         segmented_image_filename = f"segmented_{unique_id}.jpg"
         segmented_image_path = os.path.join(RESULTS_FOLDER, segmented_image_filename)
         cv2.imwrite(segmented_image_path, segmented_image)
 
         logging.info(f"Segmented image saved at: {segmented_image_path}")
 
-        # Perform Prediction
         try:
             classes = ["3VT", "ARSA", "AVSD", "Dilated Cardiac Sinus", "ECIF", "HLHS", "LVOT", "Normal Heart", "TGA", "VSD"]
             predictions = predict_single_image(segmented_image_path, model, classes, torch.device("cpu"))
@@ -146,7 +139,6 @@ def upload_files():
 
             logging.info(f"Predictions: {predictions}")
 
-            # Return results to frontend
             response = jsonify({
                 "predictions": predictions,
                 "annotations": data["shapes"],
