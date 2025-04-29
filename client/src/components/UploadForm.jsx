@@ -3,8 +3,10 @@ import axios from "axios";
 
 import BackgroundImage from "../assets/Background.png";
 
-// Backend URL (remove trailing slash)
-const BACKEND_URL = "https://heart-disease-detection-vwnf.onrender.com";
+// Backend URL - Replace this with your actual Render backend URL when deployed
+// Format should be like: https://your-app-name.onrender.com
+// DON'T USE LOCALHOST for production
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "https://your-heart-disease-detection-api.onrender.com";
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 3000;
 
@@ -18,12 +20,21 @@ const UploadForm = () => {
   const [relatedImages, setRelatedImages] = useState([]);
   const [imageUrl, setImageUrl] = useState(null);
   const [backendStatus, setBackendStatus] = useState("checking");
+  const [segmentedImage, setSegmentedImage] = useState(null);
 
   // Check if backend is available on component mount
   useEffect(() => {
     const checkBackendStatus = async () => {
       try {
-        const response = await axios.get(`${BACKEND_URL}/health`, { timeout: 10000 });
+        console.log(`Checking backend health at ${BACKEND_URL}/health`);
+        const response = await axios.get(`${BACKEND_URL}/health`, { 
+          timeout: 10000,
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          }
+        });
+        
         if (response.data && response.data.status === "healthy") {
           setBackendStatus("online");
           console.log("Backend is online and healthy");
@@ -37,36 +48,25 @@ const UploadForm = () => {
       }
     };
 
-    checkBackendStatus();
-
-    // Test CORS on component mount
+    // Test CORS by making a simple request to the backend
     const testCORS = async () => {
       try {
-        const response = await fetch(`${BACKEND_URL}/test-cors`);
-        const data = await response.json();
-        console.log("CORS Test Result:", data);
+        console.log(`Testing CORS at ${BACKEND_URL}/test-cors`);
+        const response = await axios.get(`${BACKEND_URL}/test-cors`, {
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          }
+        });
+        console.log("CORS Test Result:", response.data);
       } catch (error) {
         console.error("CORS Test Error:", error);
       }
     };
+
+    checkBackendStatus();
     testCORS();
-
   }, []);
-
-  const loadRelatedImages = (className) => {
-    try {
-      const context = require.context(
-        "./assets/RelatedImages",
-        false,
-        new RegExp(`^./${className}/.*\\.jpg$`)
-      );
-      const images = context.keys().map(context);
-      console.log("Related images:", images);
-      setRelatedImages(images);
-    } catch (error) {
-      console.error("Error loading related images:", error);
-    }
-  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -90,6 +90,7 @@ const UploadForm = () => {
     setRelatedImages([]);
     setImageUrl(null);
     setRetries(0);
+    setSegmentedImage(null);
 
     await uploadFiles();
   };
@@ -113,41 +114,33 @@ const UploadForm = () => {
         {
           headers: {
             "Content-Type": "multipart/form-data",
-            "X-Requested-With": "XMLHttpRequest"
           },
-          withCredentials: false, // Keep this false for cross-origin requests
           timeout: 90000, // 90 seconds
-          validateStatus: function (status) {
-            return status >= 200 && status < 600; // Accept all status codes for better error handling
-          }
         }
       );
 
       // Log the complete response for debugging
       console.log("Full response:", response);
 
-      // Check if the response has an error status
-      if (response.status >= 400) {
-        throw {
-          response: response,
-          message: response.data?.error || "Server error"
-        };
-      }
-
-      console.log("Response from backend (CORS test):", response.data);
       setError(null); // Clear any previous errors
       setLoading(false);
 
-      // You won't have predictions or segmented image in this test
-      if (response.data && response.data.message) {
-        // Optionally, display a success message for the CORS test
-        // setError(`Upload successful (CORS test): ${response.data.message}`);
+      // Process the response data
+      if (response.data) {
+        if (response.data.predictions) {
+          setPredictions(response.data.predictions);
+        }
+        
+        if (response.data.segmented_image) {
+          setSegmentedImage(response.data.segmented_image);
+        }
+        
+        console.log("Response processed successfully");
       }
 
     } catch (err) {
-      console.error("Error during upload (CORS test):", err);
-      console.log("Error details (CORS test):", err.config, err.response);
-
+      console.error("Error during upload:", err);
+      
       if (err.code === "ECONNABORTED") {
         if (retries < MAX_RETRIES) {
           console.log(`Request timed out. Retrying in ${RETRY_DELAY / 1000} seconds...`);
@@ -182,7 +175,7 @@ const UploadForm = () => {
     >
       <div className="bg-white bg-opacity-70 p-8 rounded-lg shadow-lg w-full max-w-lg">
         <h1 className="text-3xl font-semibold text-center mb-6 text-pink-800">
-          Upload Files (CORS Test)
+          Heart Disease Detection
         </h1>
 
         {/* Backend status indicator */}
@@ -260,19 +253,14 @@ const UploadForm = () => {
           </div>
         )}
 
-        {relatedImages.length > 0 && (
+        {segmentedImage && (
           <div className="mt-6">
-            <h3 className="font-semibold text-pink-800 mb-2">Related Images:</h3>
-            <div className="grid grid-cols-2 gap-2">
-              {relatedImages.map((img, index) => (
-                <img
-                  key={index}
-                  src={img}
-                  alt={`Related ${index + 1}`}
-                  className="w-full h-32 object-cover rounded-md"
-                />
-              ))}
-            </div>
+            <h3 className="font-semibold text-pink-800 mb-2">Segmented Image:</h3>
+            <img 
+              src={segmentedImage} 
+              alt="Segmented Heart" 
+              className="w-full h-auto border border-pink-300 rounded-md"
+            />
           </div>
         )}
       </div>
