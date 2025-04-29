@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
 # Enable CORS
-CORS(app, resources={r"/upload": {"origins": "https://heart-disease-detection-5uktr7ulx-gouresh-madyes-projects.vercel.app"}})
+CORS(app, resources={r"/upload": {"origins": "https://heart-disease-detection-ln3u8opjd-gouresh-madyes-projects.vercel.app"}})
 CORS(app, resources={r"/results/*": {"origins": "*"}}) # Allow all origins for serving results (less strict)
 CORS(app, resources={r"/health": {"origins": "*"}})
 CORS(app, resources={r"/": {"origins": "*"}})
