@@ -6,7 +6,7 @@ import BackgroundImage from "../assets/Background.png";
 // Backend URL - Replace this with your actual Render backend URL when deployed
 // Format should be like: https://your-app-name.onrender.com
 // DON'T USE LOCALHOST for production
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "https://your-heart-disease-detection-api.onrender.com";
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "https://server-d1tz.onrender.com";
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 3000;
 
