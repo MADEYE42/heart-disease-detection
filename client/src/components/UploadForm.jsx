@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import axios from "axios";
 import BackgroundImage from "../assets/Background.png";
 
-const BACKEND_URL = "https://fetal-server-372044238288.asia-south1.run.app";
+const BACKEND_URL = "https://flask-server-372044238288.asia-south1.run.app";
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 3000;
 
