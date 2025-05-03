@@ -1,9 +1,11 @@
 import React, { useState } from "react";
 import axios from "axios";
 import BackgroundImage from "../assets/Background.png";
+
 const BACKEND_URL = "https://fetal-server-372044238288.asia-south1.run.app";
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 3000;
+
 const UploadForm = () => {
   const [image, setImage] = useState(null);
   const [jsonFile, setJsonFile] = useState(null);
@@ -13,6 +15,7 @@ const UploadForm = () => {
   const [retries, setRetries] = useState(0);
   const [relatedImages, setRelatedImages] = useState([]);
   const [imageUrl, setImageUrl] = useState(null);
+
   const loadRelatedImages = (className) => {
     try {
       const context = require.context(
@@ -27,6 +30,7 @@ const UploadForm = () => {
       console.error("Error loading related images:", error);
     }
   };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     console.log("Form submitted");
@@ -40,11 +44,10 @@ const UploadForm = () => {
     setRelatedImages([]);
     setImageUrl(null);
     setRetries(0);
-    
+
     await uploadFiles();
   };
 
-  // Upload files to backend
   const uploadFiles = async () => {
     const formData = new FormData();
     formData.append("image", image);
@@ -52,20 +55,16 @@ const UploadForm = () => {
 
     try {
       console.log(`Sending POST request to ${BACKEND_URL}/upload (attempt ${retries + 1})...`);
-      const response = await axios.post(
-        `${BACKEND_URL}/upload`,
-        formData,
-        {
-          headers: { 
-            "Content-Type": "multipart/form-data"
-          },
-          withCredentials: false,
-          timeout: 90000
-        }
-      );
+      const response = await axios.post(`${BACKEND_URL}/upload`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+        withCredentials: false,
+        timeout: 90000
+      });
+
       console.log("Response from backend:", response.data);
+
       if (response.data.predictions) {
-        setPredictions(response.data.predictions);        
+        setPredictions(response.data.predictions);
         const highestPrediction = response.data.predictions.reduce(
           (max, prediction) =>
             prediction.probability > max.probability ? prediction : max,
@@ -77,6 +76,7 @@ const UploadForm = () => {
       } else {
         setError("No predictions received from the server.");
       }
+
       if (response.data.segmented_image) {
         const segmentedImageUrl = `${BACKEND_URL}${response.data.segmented_image}`;
         setImageUrl(segmentedImageUrl);
@@ -84,36 +84,34 @@ const UploadForm = () => {
       } else {
         console.warn("No segmented image in response");
       }
-      
+
       setLoading(false);
-      
     } catch (err) {
       console.error("Error during upload:", err, err.config, err.response);
-      
+
       if (err.code === "ECONNABORTED") {
         if (retries < MAX_RETRIES) {
           console.log(`Request timed out. Retrying in ${RETRY_DELAY / 1000} seconds...`);
           setError(`Request timed out. Retrying (${retries + 1}/${MAX_RETRIES})...`);
-          
           setRetries(prev => prev + 1);
           setTimeout(() => {
             uploadFiles();
           }, RETRY_DELAY);
           return;
         } else {
-          setError("The server is taking too long to respond. The operation might be too resource-intensive. Please try with a smaller image or try again later.");
+          setError("The server is taking too long to respond. Try with a smaller image or later.");
         }
       } else if (err.code === "ERR_NETWORK") {
-        setError("Network error: The server is unreachable. Please check your internet connection or try again later.");
+        setError("Network error: The server is unreachable. Check your connection or try later.");
       } else if (err.response) {
         const errorMsg = err.response.data?.error || err.response.statusText || "Unknown error";
         setError(`Server error (${err.response.status}): ${errorMsg}`);
       } else if (err.request) {
-        setError("No response from server. The server might be overloaded or down. Please try again later.");
+        setError("No response from server. It might be overloaded or down. Try later.");
       } else {
         setError(`Error: ${err.message || "Unknown error occurred"}`);
       }
-      
+
       setLoading(false);
     }
   };
@@ -127,13 +125,11 @@ const UploadForm = () => {
         <h1 className="text-3xl font-semibold text-center mb-6 text-pink-800">
           Upload Files
         </h1>
-        
+
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Image file upload input */}
           <div>
-            <label className="block mb-2 text-sm text-pink-700">
-              Upload Image
-            </label>
+            <label className="block mb-2 text-sm text-pink-700">Upload Image</label>
             <input
               type="file"
               accept="image/*"
@@ -147,10 +143,10 @@ const UploadForm = () => {
               </p>
             )}
           </div>
+
+          {/* JSON file upload input */}
           <div>
-            <label className="block mb-2 text-sm text-pink-700">
-              Upload JSON File
-            </label>
+            <label className="block mb-2 text-sm text-pink-700">Upload JSON</label>
             <input
               type="file"
               accept=".json"
@@ -164,64 +160,60 @@ const UploadForm = () => {
               </p>
             )}
           </div>
-          <button
-            type="submit"
-            disabled={loading}
-            className={`w-full py-3 rounded-md bg-pink-500 text-white font-semibold ${
-              loading ? "opacity-50" : "hover:bg-pink-600"
-            } transition-all`}
-          >
-            {loading ? `Processing${".".repeat(retries + 1)}` : "Submit"}
-          </button>
-        </form>
-        {error && (
-          <div className="mt-4 p-3 bg-red-100 border border-red-300 text-red-700 rounded-md">
-            <p className="font-semibold">Error:</p>
-            <p>{error}</p>
+
+          {/* Submit Button */}
+          <div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-pink-700 hover:bg-pink-800 text-white py-3 px-4 rounded-md transition duration-200"
+            >
+              {loading ? "Uploading..." : "Submit"}
+            </button>
           </div>
-        )}
-        {imageUrl && (
-          <div className="mt-6">
-            <h3 className="font-semibold text-pink-800 mb-2">Segmented Image:</h3>
-            <img 
-              src={imageUrl} 
-              alt="Segmented Result" 
-              className="w-full rounded-md shadow-sm"
-              onError={(e) => {
-                console.error("Image failed to load");
-                e.target.style.display = 'none';
-                setError(prev => prev ? `${prev}\nFailed to load the segmented image.` : "Failed to load the segmented image.");
-              }}
-            />
-          </div>
-        )}
-        {predictions && (
-          <div className="mt-6">
-            <h3 className="font-semibold text-pink-800">Predictions:</h3>
-            <ul className="list-disc pl-5 text-pink-700">
-              {predictions.map((pred, index) => (
-                <li key={index}>
-                  {pred.class}: {pred.probability.toFixed(2)}%
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        {relatedImages.length > 0 && (
-          <div className="mt-6">
-            <h3 className="font-semibold text-pink-800 mb-2">Related Images:</h3>
-            <div className="grid grid-cols-2 gap-2">
-              {relatedImages.map((img, index) => (
-                <img 
-                  key={index} 
-                  src={img} 
-                  alt={`Related ${index + 1}`} 
-                  className="w-full h-32 object-cover rounded-md"
-                />
-              ))}
+
+          {/* Error message */}
+          {error && <p className="text-red-600 text-sm">{error}</p>}
+
+          {/* Segmented Image */}
+          {imageUrl && (
+            <div className="mt-4">
+              <h2 className="text-pink-800 font-semibold mb-2">Segmented Image:</h2>
+              <img src={imageUrl} alt="Segmented Result" className="w-full rounded" />
             </div>
-          </div>
-        )}
+          )}
+
+          {/* Predictions */}
+          {predictions && (
+            <div className="mt-4">
+              <h2 className="text-pink-800 font-semibold mb-2">Predictions:</h2>
+              <ul className="list-disc ml-5 text-sm text-gray-700">
+                {predictions.map((pred, index) => (
+                  <li key={index}>
+                    <strong>{pred.class}</strong>: {(pred.probability * 100).toFixed(2)}%
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Related Images */}
+          {relatedImages.length > 0 && (
+            <div className="mt-4">
+              <h2 className="text-pink-800 font-semibold mb-2">Related Images:</h2>
+              <div className="grid grid-cols-2 gap-2">
+                {relatedImages.map((imgSrc, idx) => (
+                  <img
+                    key={idx}
+                    src={imgSrc}
+                    alt={`Related ${idx}`}
+                    className="w-full h-auto rounded shadow"
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </form>
       </div>
     </div>
   );
